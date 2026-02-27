@@ -8,7 +8,7 @@ from telebot import types
 from playwright.sync_api import sync_playwright
 
 # 🔑 Apni Details
-TOKEN = "8485872476:AAGt-C0JKjr6JpLwvIGtGWwMh-sFh0-PsC0"
+TOKEN = "8485872476:AAE-mNl9roDNnwDQV16M2WREkf479kKCOzs"
 chat_id = 7144917062
 bot = telebot.TeleBot(TOKEN)
 
