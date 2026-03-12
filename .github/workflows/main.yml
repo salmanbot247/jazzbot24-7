@@ -1,49 +1,68 @@
-name: Jazz Drive Direct Bot
+name: Jazz Drive Upload Bot
 
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 */5 * * *' # Backup ke liye: Agar bot galti se ruk jaye toh har 5 ghante baad khud restart hoga
+    - cron: '0 */5 * * *'
 
 jobs:
   run_bot:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-      actions: write # Naya workflow auto-start karne ke liye permission zaroori hai
+      actions: write
 
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout Repo
+        uses: actions/checkout@v3
 
       - name: Setup Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.10'
 
-      - name: Install Tools
+      - name: Install Dependencies
         run: |
-          pip install playwright pyTelegramBotAPI
+          pip install playwright pyTelegramBotAPI requests
           playwright install chromium
+          playwright install-deps chromium
 
-      - name: Run Bot (24/7 Loop Mode)
-        timeout-minutes: 350 # 6 hours se pehle band karega taake naya start ho sake
+      - name: Run Bot
+        timeout-minutes: 350
         continue-on-error: true
         run: python upload.py
 
       - name: Save Session
         if: always()
         run: |
-          git config --global user.name "GitHub Action"
-          git config --global user.email "action@github.com"
-          git add state.json
-          git commit -m "Save Login" || exit 0
-          git push
+          if [ -f state.json ]; then
+            git config --global user.name "GitHub Action"
+            git config --global user.email "action@github.com"
+            git add state.json
+            git commit -m "Save Jazz Drive session" || echo "No changes"
+            git push || echo "Push failed"
+          else
+            echo "No session file, skip."
+          fi
 
-      - name: Auto-Restart Trigger 🔄
+      - name: Auto-Restart Bot
         if: always()
         run: |
-          echo "Bot ka session purana ho gaya hai, naya start ho raha hai..."
-          curl -X POST -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-          -H "Accept: application/vnd.github.v3+json" \
-          https://api.github.com/repos/${{ github.repository }}/actions/workflows/run.yml/dispatches \
-          -d '{"ref":"main"}'
+          # Apna exact workflow file name yahan likho (jo .github/workflows/ mein hai)
+          WORKFLOW_FILE="run.yml"
+          
+          RESPONSE=$(curl -s -o /tmp/response.json -w "%{http_code}" \
+            -X POST \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/workflows/${WORKFLOW_FILE}/dispatches" \
+            -d '{"ref":"main"}')
+          
+          echo "HTTP Status: $RESPONSE"
+          cat /tmp/response.json
+          
+          if [ "$RESPONSE" != "204" ]; then
+            echo "WARNING: Restart fail hua. Check karo workflow file ka naam sahi hai: ${WORKFLOW_FILE}"
+          else
+            echo "Bot restart trigger ho gaya!"
+          fi
