@@ -1,4 +1,5 @@
 import os
+import re
 import time
 import threading
 import queue
@@ -23,8 +24,7 @@ user_context = {
     "state": "IDLE",
     "number": None,
     "otp": None,
-    "quality": None,        # YouTube quality
-    "pending_link": None,   # YouTube link waiting for quality
+    "pending_link": None,
 }
 
 BROWSER_ARGS = [
@@ -36,6 +36,12 @@ YOUTUBE_DOMAINS = ["youtube.com", "youtu.be", "youtube-nocookie.com"]
 
 def is_youtube(link):
     return any(d in link for d in YOUTUBE_DOMAINS)
+
+def safe_filename(title):
+    """Title se special chars hataao"""
+    title = re.sub(r'[\\/*?:"<>|]', '', title)
+    title = title.strip().replace(' ', '_')
+    return title[:80]  # max 80 chars
 
 # ═══════════════════════════════════════
 # 📸 Screenshot
@@ -141,34 +147,27 @@ def ask_quality(link):
         parse_mode="Markdown",
         reply_markup=markup)
 
-def get_quality_format(choice):
-    mapping = {
-        "360p":  "bestvideo[height<=360][ext=mp4]+bestaudio[ext=m4a]/best[height<=360][ext=mp4]/best[height<=360]",
-        "480p":  "bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/best[height<=480][ext=mp4]/best[height<=480]",
-        "720p":  "bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720][ext=mp4]/best[height<=720]",
-        "1080p": "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080][ext=mp4]/best[height<=1080]",
-        "best":  "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
-    }
-    for key, val in mapping.items():
-        if key in choice.lower() or "best" in choice.lower():
-            return val
-    return mapping["best"]
+def get_height_from_label(label):
+    if "360" in label: return "360"
+    if "480" in label: return "480"
+    if "720" in label: return "720"
+    if "1080" in label: return "1080"
+    return None  # None = best
 
 # ═══════════════════════════════════════
 # 🤖 Bot Commands
 # ═══════════════════════════════════════
 @bot.message_handler(commands=['start'])
 def welcome(message):
-    remove_kb = types.ReplyKeyboardRemove()
     bot.send_message(CHAT_ID,
         "🤖 *Bot Ready!*\n\n"
         "📎 Direct link bhejein → Jazz Drive upload\n"
-        "📺 YouTube link → Quality select karein\n"
+        "📺 YouTube link → Quality select\n"
         "🔍 /checklogin\n"
         "📊 /status\n"
         "💻 /cmd command",
         parse_mode="Markdown",
-        reply_markup=remove_kb)
+        reply_markup=types.ReplyKeyboardRemove())
 
 @bot.message_handler(commands=['checklogin'])
 def cmd_checklogin(message):
@@ -213,22 +212,20 @@ def handle_msg(message):
         bot.reply_to(message, "✅ OTP mil gaya...")
         return
 
-    # ── Quality select kiya ──
+    # ── Quality select ──
     if user_context["state"] == "WAITING_FOR_QUALITY":
-        quality_fmt = get_quality_format(text)
+        label = text.replace("🎯","").replace("📱","").replace("💻","").replace("🖥️","").replace("⭐","").strip()
+        height = get_height_from_label(label)
         link = user_context["pending_link"]
-        user_context["quality"] = quality_fmt
         user_context["state"] = "IDLE"
         user_context["pending_link"] = None
 
-        label = text.replace("🎯","").replace("📱","").replace("💻","").replace("🖥️","").replace("⭐","").strip()
         bot.send_message(CHAT_ID,
             f"✅ *{label} select kiya!*\nQueue mein add ho raha hai...",
             parse_mode="Markdown",
             reply_markup=remove_kb)
 
-        # Link + quality tuple queue mein
-        task_queue.put({"link": link, "quality": quality_fmt, "label": label})
+        task_queue.put({"link": link, "height": height, "label": label})
 
         with worker_lock:
             if not is_working:
@@ -239,11 +236,9 @@ def handle_msg(message):
     # ── Link ──
     if text.startswith("http"):
         if is_youtube(text):
-            # YouTube → quality pehle pucho
             ask_quality(text)
         else:
-            # Direct link → seedha queue
-            task_queue.put({"link": text, "quality": None, "label": "Direct"})
+            task_queue.put({"link": text, "height": None, "label": "Direct"})
             bot.reply_to(message,
                 f"✅ *Queue mein add!* Position: {task_queue.qsize()}",
                 parse_mode="Markdown")
@@ -262,15 +257,13 @@ def worker_loop():
     try:
         while not task_queue.empty():
             item = task_queue.get()
-            link = item["link"]
-            quality = item["quality"]
-            label = item["label"]
-            short = link[:60] + "..." if len(link) > 60 else link
-            bot.send_message(CHAT_ID,
-                f"🎬 *Processing...*\n`{short}`",
-                parse_mode="Markdown")
+            link  = item["link"]
+            height = item["height"]
+            label  = item["label"]
+            short  = link[:60] + "..." if len(link) > 60 else link
+            bot.send_message(CHAT_ID, f"🎬 *Processing...*\n`{short}`", parse_mode="Markdown")
             try:
-                process_file(link, quality, label)
+                process_file(link, height, label)
             except Exception as e:
                 bot.send_message(CHAT_ID, f"❌ Error: {str(e)[:150]}")
             finally:
@@ -288,37 +281,100 @@ def worker_loop():
 # ═══════════════════════════════════════
 # ⬇️ Universal Downloader
 # ═══════════════════════════════════════
-def file_ok(f):
-    return os.path.exists(f) and os.path.getsize(f) > 1000
+def file_ok(f, min_mb=2):
+    if not os.path.exists(f): return False
+    return os.path.getsize(f) / (1024*1024) >= min_mb
 
 def clean(f):
     if os.path.exists(f): os.remove(f)
 
-def process_file(link, quality=None, label=""):
-    OUT = "downloaded_file.mp4"
+def get_yt_title(link):
+    """YouTube video ka title lao"""
+    try:
+        result = subprocess.check_output(
+            f"yt-dlp --no-warnings --get-title '{link}'",
+            shell=True, stderr=subprocess.DEVNULL
+        ).decode().strip()
+        return safe_filename(result) if result else None
+    except:
+        return None
+
+def process_file(link, height=None, label=""):
+    yt = is_youtube(link)
+    min_size = 5 if yt else 2  # YouTube ke liye 5MB minimum
+
+    # ── YouTube title fetch ──
+    video_title = None
+    if yt:
+        bot.send_message(CHAT_ID, "📝 Video title fetch kar raha hoon...")
+        video_title = get_yt_title(link)
+        if video_title:
+            bot.send_message(CHAT_ID, f"🎬 *Title:* {video_title.replace('_', ' ')}", parse_mode="Markdown")
+
+    # Final filename: title + quality ya generic
+    if video_title:
+        q_suffix = f"_{label.replace(' ','')}" if label and label != "Best Quality" else "_best"
+        OUT = f"{video_title}{q_suffix}.mp4"
+    else:
+        OUT = "downloaded_file.mp4"
+
     success = False
 
     try:
         bot.send_message(CHAT_ID, "⬇️ *Download shuru...*", parse_mode="Markdown")
 
-        # ── Method 1: yt-dlp (YouTube + 1000 sites) ──
+        # ══════════════════════════════════════
+        # Method 1: yt-dlp
+        # ══════════════════════════════════════
         if not success:
-            q_fmt = quality if quality else "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best"
             q_label = label if label else "Best"
+
+            if yt and height:
+                # Specific quality: avc codec prefer karo (widely compatible)
+                q_fmt = (
+                    f"bestvideo[height<={height}][vcodec^=avc][ext=mp4]+"
+                    f"bestaudio[acodec^=mp4a]/"
+                    f"bestvideo[height<={height}][ext=mp4]+bestaudio/"
+                    f"bestvideo[height<={height}]+bestaudio/"
+                    f"best[height<={height}]/best"
+                )
+            elif yt:
+                # Best quality YouTube
+                q_fmt = (
+                    "bestvideo[vcodec^=avc][ext=mp4]+bestaudio[acodec^=mp4a]/"
+                    "bestvideo[ext=mp4]+bestaudio/"
+                    "bestvideo+bestaudio/best"
+                )
+            else:
+                q_fmt = "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best"
+
             bot.send_message(CHAT_ID, f"🔄 yt-dlp ({q_label})...")
             clean(OUT)
             os.system(
                 f"yt-dlp --no-warnings --no-playlist "
-                f"--socket-timeout 30 --retries 3 "
+                f"--socket-timeout 60 --retries 5 "
+                f"--fragment-retries 5 "
+                f"--concurrent-fragments 4 "
                 f"-f '{q_fmt}' "
                 f"--merge-output-format mp4 "
-                f"--add-header 'User-Agent:Mozilla/5.0' "
+                f"--add-header 'User-Agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64)' "
+                f"--no-check-certificates "
                 f"-o '{OUT}' '{link}'"
             )
-            if file_ok(OUT): success = True
 
-        # ── Method 2: aria2c (fast direct links) ──
-        if not success:
+            if os.path.exists(OUT):
+                sz = os.path.getsize(OUT) / (1024*1024)
+                bot.send_message(CHAT_ID, f"📦 yt-dlp: {sz:.1f} MB")
+                if file_ok(OUT, min_size):
+                    success = True
+                else:
+                    bot.send_message(CHAT_ID, f"⚠️ {sz:.1f}MB — bahut chhota, agle method try...")
+                    clean(OUT)
+
+        # ══════════════════════════════════════
+        # Method 2: aria2c (direct links)
+        # ══════════════════════════════════════
+        if not success and not yt:
             bot.send_message(CHAT_ID, "🔄 aria2c try kar raha hoon...")
             clean(OUT)
             os.system(
@@ -328,10 +384,16 @@ def process_file(link, quality=None, label=""):
                 f"--allow-overwrite=true "
                 f"-o '{OUT}' '{link}'"
             )
-            if file_ok(OUT): success = True
+            if os.path.exists(OUT):
+                sz = os.path.getsize(OUT) / (1024*1024)
+                bot.send_message(CHAT_ID, f"📦 aria2c: {sz:.1f} MB")
+                if file_ok(OUT, min_size): success = True
+                else: clean(OUT)
 
-        # ── Method 3: wget ──
-        if not success:
+        # ══════════════════════════════════════
+        # Method 3: wget
+        # ══════════════════════════════════════
+        if not success and not yt:
             bot.send_message(CHAT_ID, "🔄 wget try kar raha hoon...")
             clean(OUT)
             os.system(
@@ -340,10 +402,16 @@ def process_file(link, quality=None, label=""):
                 f"--no-check-certificate "
                 f"-O '{OUT}' '{link}'"
             )
-            if file_ok(OUT): success = True
+            if os.path.exists(OUT):
+                sz = os.path.getsize(OUT) / (1024*1024)
+                bot.send_message(CHAT_ID, f"📦 wget: {sz:.1f} MB")
+                if file_ok(OUT, min_size): success = True
+                else: clean(OUT)
 
-        # ── Method 4: curl ──
-        if not success:
+        # ══════════════════════════════════════
+        # Method 4: curl
+        # ══════════════════════════════════════
+        if not success and not yt:
             bot.send_message(CHAT_ID, "🔄 curl try kar raha hoon...")
             clean(OUT)
             os.system(
@@ -353,31 +421,40 @@ def process_file(link, quality=None, label=""):
                 f"-H 'Referer: {link}' "
                 f"-o '{OUT}' '{link}'"
             )
-            if file_ok(OUT): success = True
+            if os.path.exists(OUT):
+                sz = os.path.getsize(OUT) / (1024*1024)
+                bot.send_message(CHAT_ID, f"📦 curl: {sz:.1f} MB")
+                if file_ok(OUT, min_size): success = True
+                else: clean(OUT)
 
-        # ── Method 5: Python requests ──
-        if not success:
+        # ══════════════════════════════════════
+        # Method 5: Python requests
+        # ══════════════════════════════════════
+        if not success and not yt:
             bot.send_message(CHAT_ID, "🔄 Python requests try kar raha hoon...")
             clean(OUT)
             try:
-                hdrs = {
-                    'User-Agent': 'Mozilla/5.0',
-                    'Accept': '*/*',
-                    'Referer': link,
-                }
+                hdrs = {'User-Agent': 'Mozilla/5.0', 'Accept': '*/*', 'Referer': link}
                 with requests.get(link, headers=hdrs, stream=True,
                                   allow_redirects=True, timeout=60) as r:
                     r.raise_for_status()
                     with open(OUT, 'wb') as f:
                         for chunk in r.iter_content(chunk_size=8192):
                             if chunk: f.write(chunk)
-                if file_ok(OUT): success = True
+                if os.path.exists(OUT):
+                    sz = os.path.getsize(OUT) / (1024*1024)
+                    bot.send_message(CHAT_ID, f"📦 requests: {sz:.1f} MB")
+                    if file_ok(OUT, min_size): success = True
+                    else: clean(OUT)
             except Exception as e:
                 bot.send_message(CHAT_ID, f"Method 5 error: {str(e)[:100]}")
 
+        # ══════════════════════════════════════
+        # Final
+        # ══════════════════════════════════════
         if not success:
             bot.send_message(CHAT_ID,
-                "❌ *Sab methods fail!*\n\n"
+                "❌ *Download fail!*\n\n"
                 "• Link expire ho gaya ⏰\n"
                 "• Login chahiye 🔐\n"
                 "• Site blocked 🚫\n\n"
@@ -386,8 +463,12 @@ def process_file(link, quality=None, label=""):
             return
 
         size_mb = os.path.getsize(OUT) / (1024 * 1024)
+        display_name = OUT.replace('_', ' ').replace('.mp4', '')
         bot.send_message(CHAT_ID,
-            f"✅ *Download Complete!* 📦 {size_mb:.1f} MB\n⬆️ Jazz Drive pe upload ho raha hai...",
+            f"✅ *Download Complete!*\n"
+            f"🎬 {display_name}\n"
+            f"📦 Size: {size_mb:.1f} MB\n"
+            f"⬆️ Jazz Drive pe upload ho raha hai...",
             parse_mode="Markdown")
 
         jazz_drive_upload(OUT)
@@ -457,7 +538,7 @@ def jazz_drive_upload(filename):
                     page.get_by_text("Yes", exact=True).click()
             except: pass
 
-            # ── Upload wait — progress updates har 30 sec ──
+            # ── Upload wait — progress har 30 sec ──
             bot.send_message(CHAT_ID, "⏳ *Upload chal raha hai...*", parse_mode="Markdown")
             start = time.time()
             last_update = start
@@ -471,20 +552,16 @@ def jazz_drive_upload(filename):
 
                 elapsed = time.time() - start
 
-                # Har 30 second pe progress update
                 if time.time() - last_update >= 30:
                     mins = int(elapsed // 60)
                     secs = int(elapsed % 60)
-                    bot.send_message(CHAT_ID,
-                        f"⏳ Upload jari hai... {mins}m {secs}s ho gaye")
+                    bot.send_message(CHAT_ID, f"⏳ Upload jari... {mins}m {secs}s")
                     last_update = time.time()
 
-                # 20 min timeout
-                if elapsed > 1200:
-                    take_screenshot(page, "Upload status after 20 min")
+                if elapsed > 1200:  # 20 min timeout
+                    take_screenshot(page, "Upload 20min timeout")
                     bot.send_message(CHAT_ID,
-                        "⚠️ *20 min ho gaye upload mein.*\n"
-                        "Jazz Drive app mein manually check karo.",
+                        "⚠️ *20 min ho gaye.* Jazz Drive app mein check karo.",
                         parse_mode="Markdown")
                     break
 
@@ -493,8 +570,9 @@ def jazz_drive_upload(filename):
             if upload_success:
                 ctx.storage_state(path="state.json")
                 take_screenshot(page, "✅ Upload Complete!")
+                display = os.path.basename(filename).replace('_',' ').replace('.mp4','')
                 bot.send_message(CHAT_ID,
-                    "🎉 *Jazz Drive pe upload ho gayi!*\n📎 Agla link bhejein.",
+                    f"🎉 *Upload ho gayi!*\n🎬 {display}\n📎 Agla link bhejein.",
                     parse_mode="Markdown")
 
         except Exception as e:
