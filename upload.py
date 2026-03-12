@@ -313,4 +313,5 @@ def jazz_drive_upload(filename):
 
 # Start
 threading.Thread(target=check_login_status, daemon=True).start()
-bot.polling(non_stop=True, timeout=60)
+# timeout aur read_timeout badhaya — ReadTimeout fix
+bot.polling(non_stop=True, timeout=60, long_polling_timeout=60, allowed_updates=None)
