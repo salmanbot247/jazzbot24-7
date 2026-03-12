@@ -14,6 +14,7 @@ bot = telebot.TeleBot(TOKEN)
 # 🔄 Queue System
 task_queue = queue.Queue()
 is_working = False
+worker_lock = threading.Lock()
 user_context = {"state": "IDLE", "number": None, "otp": None}
 
 # 🔥 Browser Settings
@@ -22,10 +23,7 @@ BROWSER_ARGS = [
     "--disable-dev-shm-usage", "--single-process"
 ]
 
-# ───────────────────────────────────────────────
-# 📸 Screenshot Helper
-# ───────────────────────────────────────────────
-def take_screenshot(page, caption="📸 Screenshot"):
+def take_screenshot(page, caption="Screenshot"):
     try:
         path = "status.png"
         page.screenshot(path=path)
@@ -35,36 +33,27 @@ def take_screenshot(page, caption="📸 Screenshot"):
     except:
         pass
 
-# ───────────────────────────────────────────────
-# 🔑 Login Helper (Reusable)
-# ───────────────────────────────────────────────
 def do_login(page, context):
-    """Jazz Drive pe login karo aur session save karo. True/False return karta hai."""
-
     bot.send_message(CHAT_ID,
-        "🔑 *Login Zaruri Hai!*\n"
-        "Apna Jazz number bhejein (03xxxxxxxxx):",
+        "🔑 *Login Zaruri Hai!*\nJazz number bhejein (03xxxxxxxxx):",
         parse_mode="Markdown")
     user_context["state"] = "WAITING_FOR_NUMBER"
 
-    # Number ka wait (max 5 min)
     for _ in range(300):
         if user_context["state"] == "NUMBER_RECEIVED":
             break
         time.sleep(1)
     else:
-        bot.send_message(CHAT_ID, "⏰ Timeout! Number nahi aaya. Task skip.")
+        bot.send_message(CHAT_ID, "Timeout! Number nahi aaya.")
         return False
 
-    # Number fill karo
     page.locator("#msisdn").fill(user_context["number"])
     time.sleep(1)
     page.locator("#signinbtn").first.click()
     time.sleep(3)
-    take_screenshot(page, "📱 Number enter kiya")
+    take_screenshot(page, "Number enter kiya")
 
-    # OTP maango
-    bot.send_message(CHAT_ID, "🔢 *OTP bhejein jo Jazz number pe aaya:*", parse_mode="Markdown")
+    bot.send_message(CHAT_ID, "🔢 *OTP bhejein:*", parse_mode="Markdown")
     user_context["state"] = "WAITING_FOR_OTP"
 
     for _ in range(300):
@@ -72,10 +61,9 @@ def do_login(page, context):
             break
         time.sleep(1)
     else:
-        bot.send_message(CHAT_ID, "⏰ Timeout! OTP nahi aaya. Task skip.")
+        bot.send_message(CHAT_ID, "Timeout! OTP nahi aaya.")
         return False
 
-    # OTP digit by digit enter karo
     otp = user_context["otp"].strip()
     for i, digit in enumerate(otp[:6], 1):
         try:
@@ -87,22 +75,14 @@ def do_login(page, context):
             pass
 
     time.sleep(5)
-    take_screenshot(page, "✅ OTP enter kiya")
-
-    # ── Cookie Save ──
+    take_screenshot(page, "OTP enter kiya")
     context.storage_state(path="state.json")
     bot.send_message(CHAT_ID, "✅ *Login ho gaya! Cookie save ho gayi.* 🍪", parse_mode="Markdown")
-
     user_context["state"] = "IDLE"
     return True
 
-# ───────────────────────────────────────────────
-# 🔍 Login Status Check
-# ───────────────────────────────────────────────
 def check_login_status():
-    """Bot start hote hi check karo — login valid hai ya expire?"""
-    bot.send_message(CHAT_ID, "🔍 *Jazz Drive login check ho raha hai...*", parse_mode="Markdown")
-
+    bot.send_message(CHAT_ID, "🔍 *Login check ho raha hai...*", parse_mode="Markdown")
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True, args=BROWSER_ARGS)
         context = browser.new_context(
@@ -110,41 +90,29 @@ def check_login_status():
             storage_state="state.json" if os.path.exists("state.json") else None
         )
         page = context.new_page()
-
         try:
             page.goto("https://cloud.jazzdrive.com.pk/", wait_until="networkidle", timeout=90000)
             time.sleep(3)
-
             if page.locator("#msisdn").is_visible():
-                # Session expire
-                bot.send_message(CHAT_ID,
-                    "⚠️ *Session Expire Ho Gayi!*\n"
-                    "Abhi login karte hain...",
-                    parse_mode="Markdown")
+                bot.send_message(CHAT_ID, "Session expire ho gayi, login karte hain...")
                 do_login(page, context)
             else:
-                # Login theek hai
                 bot.send_message(CHAT_ID,
-                    "✅ *Login Valid Hai!*\n"
-                    "Seedha link bhejein — kaam shuru ho jaayega. 🚀",
+                    "✅ *Login Valid Hai!*\nLink bhejein. 🚀",
                     parse_mode="Markdown")
-
         except Exception as e:
-            bot.send_message(CHAT_ID, f"❌ Login check error: {str(e)[:200]}")
+            bot.send_message(CHAT_ID, f"Login check error: {str(e)[:200]}")
         finally:
             browser.close()
 
-# ───────────────────────────────────────────────
-# 🤖 Bot Commands
-# ───────────────────────────────────────────────
 @bot.message_handler(commands=['start'])
 def welcome(message):
     bot.send_message(CHAT_ID,
         "🤖 *Bot Ready!*\n\n"
-        "📎 Direct link bhejein → Jazz Drive pe upload\n"
-        "🔍 `/checklogin` → Login check karo\n"
-        "💻 `/cmd <command>` → Server control\n"
-        "📊 `/status` → Queue check",
+        "📎 Direct link bhejein\n"
+        "🔍 /checklogin\n"
+        "💻 /cmd command\n"
+        "📊 /status",
         parse_mode="Markdown")
 
 @bot.message_handler(commands=['checklogin'])
@@ -156,116 +124,107 @@ def shell_command(message):
     try:
         cmd = message.text.replace("/cmd ", "", 1).strip()
         if not cmd:
-            bot.reply_to(message, "❌ Command likhein: `/cmd ls`", parse_mode="Markdown")
+            bot.reply_to(message, "Command likhein: /cmd ls")
             return
         output = subprocess.check_output(cmd, shell=True, stderr=subprocess.STDOUT).decode("utf-8")
         output = output[:4000] if len(output) > 4000 else output
-        output = output or "✅ Done (No Output)"
+        output = output or "Done (No Output)"
         bot.reply_to(message, f"```\n{output}\n```", parse_mode="Markdown")
     except subprocess.CalledProcessError as e:
-        bot.reply_to(message, f"❌ Error:\n```\n{e.output.decode()[:3000]}\n```", parse_mode="Markdown")
+        bot.reply_to(message, f"Error: {e.output.decode()[:3000]}")
     except Exception as e:
-        bot.reply_to(message, f"❌ {str(e)}")
+        bot.reply_to(message, f"Error: {str(e)}")
 
 @bot.message_handler(commands=['status'])
 def check_status(message):
-    status = "🟢 Kaam Chal Raha Hai" if is_working else "😴 IDLE"
-    q_len = task_queue.qsize()
-    cookie = "✅ Saved" if os.path.exists("state.json") else "❌ Nahi Hai"
+    status = "Kaam Chal Raha Hai" if is_working else "IDLE"
+    cookie = "Saved" if os.path.exists("state.json") else "Nahi Hai"
     bot.send_message(CHAT_ID,
-        f"📊 *Status Report*\n\n"
-        f"⚙️ State: {status}\n"
-        f"📚 Pending: {q_len} files\n"
-        f"🍪 Cookie: {cookie}",
+        f"📊 *Status*\n\n{status}\nQueue: {task_queue.qsize()}\nCookie: {cookie}",
         parse_mode="Markdown")
 
 @bot.message_handler(func=lambda m: True)
 def handle_msg(message):
+    global is_working
     text = message.text.strip() if message.text else ""
 
-    # ── Login Flow ──
     if user_context["state"] == "WAITING_FOR_NUMBER":
         user_context["number"] = text
         user_context["state"] = "NUMBER_RECEIVED"
-        bot.reply_to(message, "✅ Number mil gaya...")
+        bot.reply_to(message, "Number mil gaya...")
         return
 
     if user_context["state"] == "WAITING_FOR_OTP":
         user_context["otp"] = text
         user_context["state"] = "OTP_RECEIVED"
-        bot.reply_to(message, "✅ OTP mil gaya, login ho raha hai...")
+        bot.reply_to(message, "OTP mil gaya...")
         return
 
-    # ── Link Handling ──
     if text.startswith("http"):
         task_queue.put(text)
-        q_len = task_queue.qsize()
         bot.reply_to(message,
-            f"✅ *Queue mein add!*\n📍 Position: {q_len}",
+            f"✅ *Queue mein add!* Position: {task_queue.qsize()}",
             parse_mode="Markdown")
 
-        global is_working
-        if not is_working:
-            threading.Thread(target=worker_loop, daemon=True).start()
+        # Lock se check karo - double thread na bane
+        with worker_lock:
+            if not is_working:
+                is_working = True
+                threading.Thread(target=worker_loop, daemon=True).start()
     else:
-        bot.reply_to(message,
-            "ℹ️ Direct download link bhejein\n"
-            "ya `/checklogin` karo",
-            parse_mode="Markdown")
+        bot.reply_to(message, "Direct link bhejein ya /checklogin karo")
 
-# ───────────────────────────────────────────────
-# 🔄 Worker Loop
-# ───────────────────────────────────────────────
 def worker_loop():
     global is_working
-    is_working = True
+    try:
+        while not task_queue.empty():
+            link = task_queue.get()
+            short = link[:70] + "..." if len(link) > 70 else link
+            bot.send_message(CHAT_ID,
+                f"🎬 *Processing...*\n`{short}`",
+                parse_mode="Markdown")
+            try:
+                process_file(link)
+            except Exception as e:
+                bot.send_message(CHAT_ID, f"File Error: {str(e)[:200]}")
+            finally:
+                task_queue.task_done()
 
-    while not task_queue.empty():
-        link = task_queue.get()
-        short = link[:70] + "..." if len(link) > 70 else link
         bot.send_message(CHAT_ID,
-            f"🎬 *Processing...*\n🔗 `{short}`",
+            "✅ *Sab ho gaya!*\n\n📎 Agla link bhejein ya ruk jaao.",
             parse_mode="Markdown")
-        process_file(link)
-        task_queue.task_done()
 
-    # ── Queue khaali — agla link maango ──
-    is_working = False
-    bot.send_message(CHAT_ID,
-        "✅ *Sab files upload ho gayi!*\n\n"
-        "📎 *Agla link bhejein* ya ruk jaao. 😊",
-        parse_mode="Markdown")
+    except Exception as e:
+        bot.send_message(CHAT_ID, f"Worker crash: {str(e)[:200]}")
+    finally:
+        # HAMESHA reset hoga - yahi fix hai
+        with worker_lock:
+            is_working = False
 
-# ───────────────────────────────────────────────
-# ⬇️ Download
-# ───────────────────────────────────────────────
 def process_file(link):
     filename = "downloaded_file.mp4"
-
     try:
         bot.send_message(CHAT_ID, "⬇️ *Downloading...*", parse_mode="Markdown")
         os.system(f"curl -L --retry 3 -A 'Mozilla/5.0' -o '{filename}' '{link}'")
 
         if not os.path.exists(filename) or os.path.getsize(filename) < 1000:
-            bot.send_message(CHAT_ID, "❌ Download fail. Skip kar raha hoon.")
+            bot.send_message(CHAT_ID, "Download fail. Skip.")
             return
 
         size_mb = os.path.getsize(filename) / (1024 * 1024)
         bot.send_message(CHAT_ID,
-            f"✅ *Download Complete!*\n📦 Size: {size_mb:.1f} MB\n⬆️ Uploading...",
+            f"✅ *Download Done!* {size_mb:.1f} MB\nUploading...",
             parse_mode="Markdown")
 
         jazz_drive_upload(filename)
 
     except Exception as e:
-        bot.send_message(CHAT_ID, f"❌ Critical Error: {str(e)[:200]}")
+        bot.send_message(CHAT_ID, f"Error: {str(e)[:200]}")
+        raise
     finally:
         if os.path.exists(filename):
             os.remove(filename)
 
-# ───────────────────────────────────────────────
-# ☁️ Jazz Drive Upload
-# ───────────────────────────────────────────────
 def jazz_drive_upload(filename):
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True, args=BROWSER_ARGS)
@@ -281,40 +240,30 @@ def jazz_drive_upload(filename):
             page.goto("https://cloud.jazzdrive.com.pk/", wait_until="networkidle", timeout=90000)
             time.sleep(3)
 
-            # ── Login Expire Check ──
             if page.locator("#msisdn").is_visible():
-                bot.send_message(CHAT_ID,
-                    "⚠️ *Session Expire Ho Gayi!* Login karna padega.",
-                    parse_mode="Markdown")
+                bot.send_message(CHAT_ID, "Session expire! Login karo.", parse_mode="Markdown")
                 success = do_login(page, context)
                 if not success:
-                    bot.send_message(CHAT_ID, "❌ Login fail — file skip.")
-                    browser.close()
+                    bot.send_message(CHAT_ID, "Login fail - skip.")
                     return
-                # Fresh page load after login
                 page.goto("https://cloud.jazzdrive.com.pk/", wait_until="networkidle", timeout=90000)
                 time.sleep(3)
 
-            # ── Cookie Refresh ──
             context.storage_state(path="state.json")
 
-            # ── Upload Button ──
-            bot.send_message(CHAT_ID, "📤 *File select ho rahi hai...*", parse_mode="Markdown")
+            bot.send_message(CHAT_ID, "📤 *Uploading...*", parse_mode="Markdown")
             time.sleep(2)
 
             try:
                 page.evaluate("""
                     document.querySelectorAll('header button').forEach(b => {
-                        if(b.innerHTML.includes('svg') || b.innerHTML.includes('upload')) {
-                            b.click();
-                        }
+                        if(b.innerHTML.includes('svg') || b.innerHTML.includes('upload')) b.click();
                     });
                 """)
                 time.sleep(2)
             except:
                 pass
 
-            # ── File Input ──
             try:
                 dialog = page.locator("div[role='dialog']")
                 if dialog.is_visible():
@@ -328,15 +277,13 @@ def jazz_drive_upload(filename):
 
             time.sleep(3)
 
-            # Confirm popup
             try:
                 if page.get_by_text("Yes", exact=True).is_visible():
                     page.get_by_text("Yes", exact=True).click()
             except:
                 pass
 
-            # ── Upload Complete Wait (max 10 min) ──
-            bot.send_message(CHAT_ID, "⏳ *Upload chal raha hai...*", parse_mode="Markdown")
+            bot.send_message(CHAT_ID, "⏳ Upload chal raha hai...")
             start = time.time()
             while True:
                 try:
@@ -346,28 +293,24 @@ def jazz_drive_upload(filename):
                 except:
                     pass
                 if time.time() - start > 600:
-                    bot.send_message(CHAT_ID, "⚠️ 10 min timeout — Jazz Drive app mein manually check karo.")
+                    bot.send_message(CHAT_ID, "10 min timeout. Jazz Drive check karo.")
                     break
                 time.sleep(2)
 
-            # ── Upload Success ──
             if upload_success:
-                take_screenshot(page, "✅ Upload Complete!")
-                # Cookie fresh save
                 context.storage_state(path="state.json")
+                take_screenshot(page, "Upload Complete!")
                 bot.send_message(CHAT_ID,
-                    "🎉 *File Jazz Drive pe upload ho gayi!*\n\n"
-                    "📎 *Agla link bhejein* ya ruk jaao. 😊",
+                    "🎉 *Jazz Drive pe upload ho gayi!*",
                     parse_mode="Markdown")
 
         except Exception as e:
-            take_screenshot(page, "❌ Error")
-            bot.send_message(CHAT_ID, f"❌ Upload Error: {str(e)[:200]}")
+            take_screenshot(page, "Error")
+            bot.send_message(CHAT_ID, f"Upload Error: {str(e)[:200]}")
+            raise
         finally:
             browser.close()
 
-# ───────────────────────────────────────────────
-# 🚀 Start — Pehle Login Check, Phir Bot On
-# ───────────────────────────────────────────────
+# Start
 threading.Thread(target=check_login_status, daemon=True).start()
 bot.polling(non_stop=True, timeout=60)
