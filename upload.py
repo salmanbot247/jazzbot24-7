@@ -205,10 +205,30 @@ def process_file(link):
     filename = "downloaded_file.mp4"
     try:
         bot.send_message(CHAT_ID, "⬇️ *Downloading...*", parse_mode="Markdown")
-        os.system(f"curl -L --retry 3 -A 'Mozilla/5.0' -o '{filename}' '{link}'")
 
+        # Pehle yt-dlp try karo (Google, YouTube, aur baaki sab ke liye)
+        ytdlp_cmd = (
+            f"yt-dlp --no-warnings --no-playlist "
+            f"-f 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best' "
+            f"--merge-output-format mp4 "
+            f"-o '{filename}' '{link}'"
+        )
+        ret = os.system(ytdlp_cmd)
+
+        # Agar yt-dlp kaam na kare toh curl try karo
         if not os.path.exists(filename) or os.path.getsize(filename) < 1000:
-            bot.send_message(CHAT_ID, "Download fail. Skip.")
+            bot.send_message(CHAT_ID, "⬇️ yt-dlp se nahi hua, curl try kar raha hoon...")
+            if os.path.exists(filename):
+                os.remove(filename)
+            os.system(f"curl -L --retry 3 -A 'Mozilla/5.0' -o '{filename}' '{link}'")
+
+        # Dono fail
+        if not os.path.exists(filename) or os.path.getsize(filename) < 1000:
+            bot.send_message(CHAT_ID,
+                "❌ *Download fail ho gaya.*\n"
+                "Link expired ho sakta hai ya protected hai.\n"
+                "Naya/fresh link bhejein.",
+                parse_mode="Markdown")
             return
 
         size_mb = os.path.getsize(filename) / (1024 * 1024)
