@@ -16,6 +16,10 @@ jobs:
       - name: Checkout Repo
         uses: actions/checkout@v3
 
+      # 🛡️ THE MAGIC: Cloudflare WARP VPN (IP Masking ke liye)
+      - name: Setup Cloudflare WARP
+        uses: fscarmen/warp-on-actions@v1.1
+
       - name: Setup Python
         uses: actions/setup-python@v4
         with:
@@ -43,10 +47,17 @@ jobs:
           playwright install chromium
           playwright install-deps chromium
 
+      # 🍪 SECRET KO FILE MEIN CONVERT KAREIN AUR BOT CHALAYEN
       - name: Run Bot
         timeout-minutes: 350
         continue-on-error: true
-        run: python upload.py
+        env:
+          YT_COOKIES: ${{ secrets.YT_COOKIES }}
+        run: |
+          if [ ! -z "$YT_COOKIES" ]; then
+            echo "$YT_COOKIES" > cookies.txt
+          fi
+          python upload.py
 
       - name: Save Session
         if: always()
