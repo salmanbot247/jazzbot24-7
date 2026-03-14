@@ -61,7 +61,7 @@ def take_screenshot(page, caption="📸"):
         pass
 
 # ═══════════════════════════════════════
-# 🔑 Login (OTP FIXED)
+# 🔑 Login
 # ═══════════════════════════════════════
 def do_login(page, context):
     msg(
@@ -83,7 +83,7 @@ def do_login(page, context):
     page.locator("#msisdn").fill(user_context["number"])
     time.sleep(1)
     page.locator("#signinbtn").first.click()
-    time.sleep(4)
+    time.sleep(3)
     take_screenshot(page, "📱 Number submit kiya")
 
     msg(
@@ -100,27 +100,15 @@ def do_login(page, context):
         msg("⏰ *Timeout!* OTP nahi aaya. Task cancel.")
         return False
 
-    otp_str = user_context["otp"].strip()[:4]
-    
-    # 🛠️ THE OTP FIX (JS Injection)
-    try:
-        page.fill('#otp', otp_str, timeout=3000)
-    except:
+    for i, digit in enumerate(user_context["otp"].strip()[:6], 1):
         try:
-            page.evaluate(f'document.getElementById("otp").value = "{otp_str}"')
-        except:
-            for digit in otp_str:
-                page.keyboard.press(digit)
-                time.sleep(0.1)
+            f = page.locator(f"//input[@aria-label='Digit {i}']")
+            if f.is_visible():
+                f.fill(digit)
+                time.sleep(0.2)
+        except: pass
 
-    time.sleep(1)
-    
-    try:
-        page.locator('#signinbtn').click(timeout=5000)
-    except:
-        page.click('button:has-text("Login")')
-
-    time.sleep(8)
+    time.sleep(5)
     take_screenshot(page, "🔢 OTP submit kiya")
     context.storage_state(path="state.json")
     msg(
@@ -151,7 +139,7 @@ def check_login_status():
         try:
             page.goto("https://cloud.jazzdrive.com.pk/", wait_until="networkidle", timeout=90000)
             time.sleep(3)
-            if page.locator("#msisdn").is_visible() or page.locator('input[type="tel"]').is_visible():
+            if page.locator("#msisdn").is_visible():
                 msg("⚠️ *Session expire ho gayi!*\nLogin karte hain...")
                 do_login(page, ctx)
             else:
@@ -243,3 +231,13 @@ def cmd_shell(message):
     except subprocess.CalledProcessError as e:
         bot.reply_to(message, f"❌ *Error:*\n
 http://googleusercontent.com/immersive_entry_chip/0
+
+### 🚨 Sab Se Zaroori Kaam (Cookies ka Setup):
+YouTube ab bina cookies ke chalne nahi dega, isliye aapko GitHub par apni cookie lazmi add karni hogi taake `run.yml` usay read kar sake:
+1. Kisi fuzool Google account se YouTube login karein aur browser extension se `cookies.txt` nikal lein.
+2. Apni GitHub Repository mein jayen -> **Settings** -> **Secrets and variables** -> **Actions** par click karein.
+3. **New repository secret** ke button par click karein.
+4. **Name** mein likhein: `YT_COOKIES`
+5. **Secret** wale dabbe mein apni cookie file ka saara text paste kar dein aur Save kar dein.
+
+Ab aap apne GitHub par naya run start karein, InshaAllah speed bhi makhhan hogi aur YouTube block bhi nahi karega!
