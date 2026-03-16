@@ -12,7 +12,7 @@ from playwright.sync_api import sync_playwright
 # ═══════════════════════════════════════
 # 🔑 Apni Details
 # ═══════════════════════════════════════
-TOKEN = "8794212334:AAHa5XCXTuUZ_rtmtEWIsdPVvvPFHdt49Ss"
+TOKEN = "8485872476:AAE-mNl9roDNnwDQV16M2WREkf479kKCOzs"
 CHAT_ID = 7144917062
 bot = telebot.TeleBot(TOKEN)
 
@@ -23,19 +23,13 @@ worker_lock = threading.Lock()
 user_context = {
     "state": "IDLE",
     "number": None,
-    "otp": None,
-    "pending_link": None,
+    "otp": None
 }
 
 BROWSER_ARGS = [
     "--disable-gpu", "--no-sandbox",
     "--disable-dev-shm-usage", "--single-process"
 ]
-
-YOUTUBE_DOMAINS = ["youtube.com", "youtu.be", "youtube-nocookie.com"]
-
-def is_youtube(link):
-    return any(d in link for d in YOUTUBE_DOMAINS)
 
 def safe_filename(title):
     title = re.sub(r'[\\/*?:"<>|]', '', title)
@@ -66,7 +60,7 @@ def take_screenshot(page, caption="📸"):
 def do_login(page, context):
     msg(
         f"╔══════════════════════╗\n"
-        f"║   🔐  *LOGIN REQUIRED*   ║\n"
+        f"║   🔐  *LOGIN REQUIRED* ║\n"
         f"╚══════════════════════╝\n\n"
         f"📱 Apna Jazz number bhejein\n"
         f"Format: `03XXXXXXXXX`"
@@ -80,10 +74,14 @@ def do_login(page, context):
         msg("⏰ *Timeout!* Number nahi aaya. Task cancel.")
         return False
 
-    page.locator("#msisdn").fill(user_context["number"])
+    try:
+        page.fill('input[type="tel"]', user_context["number"].strip(), timeout=5000)
+    except:
+        page.fill("#msisdn", user_context["number"].strip())
+        
     time.sleep(1)
     page.locator("#signinbtn").first.click()
-    time.sleep(3)
+    time.sleep(4)
     take_screenshot(page, "📱 Number submit kiya")
 
     msg(
@@ -100,16 +98,29 @@ def do_login(page, context):
         msg("⏰ *Timeout!* OTP nahi aaya. Task cancel.")
         return False
 
-    for i, digit in enumerate(user_context["otp"].strip()[:6], 1):
+    otp_val = user_context["otp"].strip()
+    
+    try:
+        page.fill('#otp', otp_val, timeout=3000)
+    except:
         try:
-            f = page.locator(f"//input[@aria-label='Digit {i}']")
-            if f.is_visible():
-                f.fill(digit)
-                time.sleep(0.2)
-        except: pass
+            page.evaluate(f'document.getElementById("otp").value = "{otp_val}"')
+        except:
+            for digit in otp_val[:4]:
+                page.keyboard.press(digit)
+                time.sleep(0.1)
 
-    time.sleep(5)
+    time.sleep(2)
     take_screenshot(page, "🔢 OTP submit kiya")
+    
+    try:
+        page.locator("#signinbtn").first.click()
+    except:
+        page.click('button:has-text("Login")')
+        
+    time.sleep(10)
+    take_screenshot(page, "🌐 Dashboard check")
+    
     context.storage_state(path="state.json")
     msg(
         f"┌─────────────────────┐\n"
@@ -139,48 +150,21 @@ def check_login_status():
         try:
             page.goto("https://cloud.jazzdrive.com.pk/", wait_until="networkidle", timeout=90000)
             time.sleep(3)
-            if page.locator("#msisdn").is_visible():
+            if page.locator("#msisdn").is_visible() or page.locator('input[type="tel"]').is_visible():
                 msg("⚠️ *Session expire ho gayi!*\nLogin karte hain...")
                 do_login(page, ctx)
             else:
                 msg(
                     f"╔══════════════════════╗\n"
-                    f"║  ✅  *LOGIN VALID HAI!*  ║\n"
+                    f"║  ✅  *LOGIN VALID HAI!* ║\n"
                     f"╚══════════════════════╝\n\n"
-                    f"🚀 Link bhejein — ready hoon!"
+                    f"🚀 Direct Link bhejein — ready hoon!"
                 )
         except Exception as e:
+            take_screenshot(page, "❌ Login check error")
             msg(f"❌ Login check error:\n`{str(e)[:150]}`")
         finally:
             browser.close()
-
-# ═══════════════════════════════════════
-# 📺 YouTube Quality Keyboard
-# ═══════════════════════════════════════
-def ask_quality(link):
-    user_context["pending_link"] = link
-    user_context["state"] = "WAITING_FOR_QUALITY"
-
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-    markup.row("🎯 360p", "📱 480p")
-    markup.row("💻 720p", "🖥️ 1080p")
-    markup.row("⭐ Best Quality")
-
-    msg(
-        f"╔══════════════════════╗\n"
-        f"║  📺  *YOUTUBE DETECTED*  ║\n"
-        f"╚══════════════════════╝\n\n"
-        f"🎬 Kaunsi quality mein\n"
-        f"download karein?",
-        reply_markup=markup
-    )
-
-def get_height_from_label(label):
-    if "360" in label: return "360"
-    if "480" in label: return "480"
-    if "720" in label: return "720"
-    if "1080" in label: return "1080"
-    return None
 
 # ═══════════════════════════════════════
 # 🤖 Bot Commands
@@ -189,11 +173,11 @@ def get_height_from_label(label):
 def welcome(message):
     msg(
         f"╔════════════════════════╗\n"
-        f"║  🤖  *JAZZ DRIVE BOT*  ║\n"
+        f"║  🤖  *JAZZ DRIVE BOT* ║\n"
         f"╚════════════════════════╝\n\n"
         f"*Kya kar sakta hoon:*\n\n"
-        f"📎 Direct link → Jazz Drive upload\n"
-        f"📺 YouTube link → Quality select\n"
+        f"📎 Direct link → Download & Upload\n"
+        f"⚡ 5 Download Methods Engine\n"
         f"📋 Queue system — ek ke baad ek\n\n"
         f"{divider()}\n"
         f"*Commands:*\n"
@@ -214,7 +198,7 @@ def cmd_status(message):
     cookie = "✅ Active" if os.path.exists("state.json") else "❌ Nahi hai"
     msg(
         f"╔══════════════════════╗\n"
-        f"║   📊  *BOT STATUS*      ║\n"
+        f"║   📊  *BOT STATUS* ║\n"
         f"╚══════════════════════╝\n\n"
         f"{status_icon} *State:* {status_text}\n"
         f"📋 *Queue:* {task_queue.qsize()} files pending\n"
@@ -229,7 +213,8 @@ def cmd_shell(message):
         out = out[:4000] or "✅ Done (no output)"
         bot.reply_to(message, f"💻 *Output:*\n```\n{out}\n```", parse_mode="Markdown")
     except subprocess.CalledProcessError as e:
-        bot.reply_to(message, f"❌ *Error:*\n```\n{e.output.decode()[:3000]}\n```", parse_mode="Markdown")
+        err_msg = e.output.decode()[:3000]
+        bot.reply_to(message, f"❌ *Error:*\n```\n{err_msg}\n```", parse_mode="Markdown")
     except Exception as e:
         bot.reply_to(message, f"❌ `{str(e)}`", parse_mode="Markdown")
 
@@ -237,7 +222,6 @@ def cmd_shell(message):
 def handle_msg(message):
     global is_working
     text = message.text.strip() if message.text else ""
-    remove_kb = types.ReplyKeyboardRemove()
 
     # ── Login states ──
     if user_context["state"] == "WAITING_FOR_NUMBER":
@@ -252,44 +236,20 @@ def handle_msg(message):
         bot.reply_to(message, "✅ OTP receive hua...")
         return
 
-    # ── Quality select ──
-    if user_context["state"] == "WAITING_FOR_QUALITY":
-        label = text.replace("🎯","").replace("📱","").replace("💻","").replace("🖥️","").replace("⭐","").strip()
-        height = get_height_from_label(label)
-        link = user_context["pending_link"]
-        user_context["state"] = "IDLE"
-        user_context["pending_link"] = None
-
-        msg(
-            f"✅ *{label}* quality select!\n"
-            f"📋 Queue mein add ho raha hai...",
-            reply_markup=remove_kb
-        )
-
-        task_queue.put({"link": link, "height": height, "label": label})
+    # ── Direct Link Handler ──
+    if text.startswith("http"):
+        task_queue.put({"link": text})
+        bot.reply_to(message,
+            f"✅ *Queue mein add!*\n"
+            f"📍 Position: *{task_queue.qsize()}*",
+            parse_mode="Markdown")
         with worker_lock:
             if not is_working:
                 is_working = True
                 threading.Thread(target=worker_loop, daemon=True).start()
-        return
-
-    # ── Link ──
-    if text.startswith("http"):
-        if is_youtube(text):
-            ask_quality(text)
-        else:
-            task_queue.put({"link": text, "height": None, "label": "Direct"})
-            bot.reply_to(message,
-                f"✅ *Queue mein add!*\n"
-                f"📍 Position: *{task_queue.qsize()}*",
-                parse_mode="Markdown")
-            with worker_lock:
-                if not is_working:
-                    is_working = True
-                    threading.Thread(target=worker_loop, daemon=True).start()
     else:
         bot.reply_to(message,
-            f"ℹ️ Direct link bhejein\n"
+            f"ℹ️ Sirf Direct Link bhejein\n"
             f"ya `/checklogin` try karein",
             parse_mode="Markdown")
 
@@ -302,17 +262,15 @@ def worker_loop():
         while not task_queue.empty():
             item = task_queue.get()
             link  = item["link"]
-            height = item["height"]
-            label  = item["label"]
             short  = link[:55] + "..." if len(link) > 55 else link
             msg(
                 f"╔══════════════════════╗\n"
-                f"║   🎬  *PROCESSING...*   ║\n"
+                f"║   🎬  *PROCESSING...* ║\n"
                 f"╚══════════════════════╝\n\n"
                 f"🔗 `{short}`"
             )
             try:
-                process_file(link, height, label)
+                process_file(link)
             except Exception as e:
                 msg(f"❌ *Error:*\n`{str(e)[:150]}`")
             finally:
@@ -320,7 +278,7 @@ def worker_loop():
 
         msg(
             f"╔══════════════════════╗\n"
-            f"║  ✅  *QUEUE COMPLETE!*  ║\n"
+            f"║  ✅  *QUEUE COMPLETE!* ║\n"
             f"╚══════════════════════╝\n\n"
             f"📎 Agla link bhejein\n"
             f"ya rest karo! 😊"
@@ -332,97 +290,54 @@ def worker_loop():
             is_working = False
 
 # ═══════════════════════════════════════
-# ⬇️ Universal Downloader
+# ⬇️ Universal Downloader (5 Methods)
 # ═══════════════════════════════════════
-def file_ok(f, min_mb=2):
+def file_ok(f, min_mb=1):
     if not os.path.exists(f): return False
     return os.path.getsize(f) / (1024*1024) >= min_mb
 
 def clean(f):
     if os.path.exists(f): os.remove(f)
 
-def get_yt_title(link):
-    try:
-        result = subprocess.check_output(
-            f"yt-dlp --no-warnings --get-title '{link}'",
-            shell=True, stderr=subprocess.DEVNULL
-        ).decode().strip()
-        return safe_filename(result) if result else None
-    except:
-        return None
-
-def process_file(link, height=None, label=""):
-    yt = is_youtube(link)
-    min_size = 5 if yt else 2
-
-    video_title = None
-    if yt:
-        msg(f"📝 *Video info fetch ho rahi hai...*")
-        video_title = get_yt_title(link)
-        if video_title:
-            display = video_title.replace('_', ' ')
-            msg(
-                f"🎬 *{display}*\n"
-                f"📐 Quality: *{label}*"
-            )
-
-    if video_title:
-        q_suffix = f"_{label.replace(' ','')}" if label and label != "Best Quality" else "_best"
-        OUT = f"{video_title}{q_suffix}.mp4"
-    else:
-        OUT = "downloaded_file.mp4"
+def process_file(link):
+    # Link se filename nikalne ki koshish (default name agar na mile)
+    parsed_name = link.split('?')[0].split('/')[-1]
+    if not parsed_name or len(parsed_name) < 3:
+        parsed_name = f"download_file_{int(time.time())}.mp4"
+    OUT = safe_filename(parsed_name)
+    
+    # Agar extension na ho toh mp4 laga dein
+    if '.' not in OUT[-6:]:
+        OUT += ".mp4"
 
     success = False
+    min_size = 1 # Minimum 1MB file zaroori hai
 
     try:
         msg(
             f"┌─────────────────────┐\n"
-            f"│  ⬇️  *DOWNLOADING...*  │\n"
-            f"└─────────────────────┘"
+            f"│  ⬇️  *DOWNLOADING...* │\n"
+            f"└─────────────────────┘\n"
+            f"📁 Target: `{OUT}`"
         )
 
-        # ── Method 1: yt-dlp ──
+        # ── Method 1: yt-dlp (Generic Mode) ──
         if not success:
-            q_label = label if label else "Best"
-            if yt and height:
-                q_fmt = (
-                    f"bestvideo[height<={height}][vcodec^=avc][ext=mp4]+"
-                    f"bestaudio[acodec^=mp4a]/"
-                    f"bestvideo[height<={height}][ext=mp4]+bestaudio/"
-                    f"bestvideo[height<={height}]+bestaudio/"
-                    f"best[height<={height}]/best"
-                )
-            elif yt:
-                q_fmt = (
-                    "bestvideo[vcodec^=avc][ext=mp4]+bestaudio[acodec^=mp4a]/"
-                    "bestvideo[ext=mp4]+bestaudio/bestvideo+bestaudio/best"
-                )
-            else:
-                q_fmt = "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best"
-
-            msg(f"🔄 *Method 1/5* — yt-dlp `({q_label})`")
+            msg(f"🔄 *Method 1/5* — yt-dlp")
             clean(OUT)
             os.system(
                 f"yt-dlp --no-warnings --no-playlist "
-                f"--socket-timeout 60 --retries 5 "
-                f"--fragment-retries 5 "
-                f"--concurrent-fragments 4 "
-                f"-f '{q_fmt}' "
-                f"--merge-output-format mp4 "
-                f"--add-header 'User-Agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64)' "
-                f"--no-check-certificates "
+                f"--socket-timeout 60 --retries 3 "
                 f"-o '{OUT}' '{link}'"
             )
             if os.path.exists(OUT):
                 sz = os.path.getsize(OUT) / (1024*1024)
                 msg(f"📦 yt-dlp result: *{sz:.1f} MB*")
                 if file_ok(OUT, min_size): success = True
-                else:
-                    msg(f"⚠️ Too small ({sz:.1f}MB) — next method...")
-                    clean(OUT)
+                else: clean(OUT)
 
         # ── Method 2: aria2c ──
-        if not success and not yt:
+        if not success:
             msg("🔄 *Method 2/5* — aria2c")
             clean(OUT)
             os.system(
@@ -438,7 +353,7 @@ def process_file(link, height=None, label=""):
                 else: clean(OUT)
 
         # ── Method 3: wget ──
-        if not success and not yt:
+        if not success:
             msg("🔄 *Method 3/5* — wget")
             clean(OUT)
             os.system(
@@ -453,7 +368,7 @@ def process_file(link, height=None, label=""):
                 else: clean(OUT)
 
         # ── Method 4: curl ──
-        if not success and not yt:
+        if not success:
             msg("🔄 *Method 4/5* — curl")
             clean(OUT)
             os.system(
@@ -468,7 +383,7 @@ def process_file(link, height=None, label=""):
                 else: clean(OUT)
 
         # ── Method 5: requests ──
-        if not success and not yt:
+        if not success:
             msg("🔄 *Method 5/5* — Python requests")
             clean(OUT)
             try:
@@ -491,24 +406,23 @@ def process_file(link, height=None, label=""):
         if not success:
             msg(
                 f"╔══════════════════════╗\n"
-                f"║  ❌  *DOWNLOAD FAILED*  ║\n"
+                f"║  ❌  *DOWNLOAD FAILED* ║\n"
                 f"╚══════════════════════╝\n\n"
                 f"Sab 5 methods fail ho gaye!\n\n"
                 f"*Possible reasons:*\n"
                 f"⏰ Link expire ho gaya\n"
                 f"🔐 Login/auth chahiye\n"
                 f"🚫 Site ne block kiya\n\n"
-                f"📎 Fresh link bhejein."
+                f"📎 Fresh direct link bhejein."
             )
             return
 
         size_mb = os.path.getsize(OUT) / (1024*1024)
-        display = OUT.replace('_', ' ').replace('.mp4', '')
         msg(
             f"╔══════════════════════╗\n"
-            f"║  ✅  *DOWNLOAD DONE!*   ║\n"
+            f"║  ✅  *DOWNLOAD DONE!* ║\n"
             f"╚══════════════════════╝\n\n"
-            f"🎬 *{display[:40]}*\n"
+            f"🎬 *{OUT[:40]}*\n"
             f"📦 Size: *{size_mb:.1f} MB*\n\n"
             f"☁️ Jazz Drive pe upload\n"
             f"ho raha hai..."
@@ -523,7 +437,7 @@ def process_file(link, height=None, label=""):
         clean(OUT)
 
 # ═══════════════════════════════════════
-# ☁️ Jazz Drive Upload
+# ☁️ Jazz Drive Upload (Fixed Completeness)
 # ═══════════════════════════════════════
 def jazz_drive_upload(filename):
     with sync_playwright() as p:
@@ -540,7 +454,7 @@ def jazz_drive_upload(filename):
             page.goto("https://cloud.jazzdrive.com.pk/", wait_until="networkidle", timeout=90000)
             time.sleep(3)
 
-            if page.locator("#msisdn").is_visible():
+            if page.locator("#msisdn").is_visible() or page.locator('input[type="tel"]').is_visible():
                 msg("⚠️ *Session expire ho gayi!*\nLogin karo pehle...")
                 ok = do_login(page, ctx)
                 if not ok:
@@ -553,7 +467,7 @@ def jazz_drive_upload(filename):
 
             msg(
                 f"┌─────────────────────┐\n"
-                f"│  📤  *UPLOADING...*    │\n"
+                f"│  📤  *UPLOADING...* │\n"
                 f"└─────────────────────┘\n\n"
                 f"File select ho rahi hai..."
             )
@@ -585,3 +499,59 @@ def jazz_drive_upload(filename):
                 if page.get_by_text("Yes", exact=True).is_visible():
                     page.get_by_text("Yes", exact=True).click()
             except: pass
+
+            msg("⏳ *Upload jari hai...*\nHar 30 sec mein update milega.")
+            start = time.time()
+            last_update = start
+
+            while True:
+                try:
+                    if page.get_by_text("Uploads completed").is_visible():
+                        upload_success = True
+                        break
+                except: pass
+
+                elapsed = time.time() - start
+                if time.time() - last_update >= 30:
+                    mins = int(elapsed // 60)
+                    secs = int(elapsed % 60)
+                    msg(f"📡 *Upload progress:* `{mins}m {secs}s` elapsed...")
+                    last_update = time.time()
+
+                if elapsed > 1200:
+                    take_screenshot(page, "⏰ 20min timeout")
+                    msg(
+                        f"⚠️ *20 dakika ho gaye!*\n"
+                        f"Jazz Drive app mein\n"
+                        f"manually check karein."
+                    )
+                    break
+
+                time.sleep(2)
+
+            if upload_success:
+                ctx.storage_state(path="state.json")
+                take_screenshot(page, "✅ Upload Complete!")
+                display = os.path.basename(filename).replace('_',' ')
+                msg(
+                    f"╔══════════════════════╗\n"
+                    f"║  🎉  *UPLOAD SUCCESS!* ║\n"
+                    f"╚══════════════════════╝\n\n"
+                    f"🎬 *{display[:40]}*\n\n"
+                    f"✅ Jazz Drive mein save!\n"
+                    f"📎 Agla link bhejein. 🚀"
+                )
+
+        except Exception as e:
+            take_screenshot(page, "❌ Upload Error")
+            msg(f"❌ *Upload Error:*\n`{str(e)[:200]}`")
+            raise
+        finally:
+            browser.close()
+
+# ═══════════════════════════════════════
+# 🚀 Start
+# ═══════════════════════════════════════
+threading.Thread(target=check_login_status, daemon=True).start()
+bot.polling(non_stop=True, timeout=60, long_polling_timeout=60)
+                  
