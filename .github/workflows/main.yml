@@ -23,23 +23,13 @@ jobs:
 
       - name: Install Dependencies
         run: |
-          # System tools
-          sudo apt-get install -y aria2 ffmpeg
-
-          # Python packages
+          sudo apt-get install -y aria2 ffmpeg wget curl
           pip install --upgrade pip
           pip install playwright pyTelegramBotAPI requests yt-dlp
-
-          # yt-dlp ko system PATH mein daalo (important!)
           sudo cp $(python -c "import shutil; print(shutil.which('yt-dlp'))") /usr/local/bin/yt-dlp
           sudo chmod +x /usr/local/bin/yt-dlp
-
-          # Verify
           yt-dlp --version
           aria2c --version | head -1
-          ffmpeg -version | head -1
-
-          # Playwright
           playwright install chromium
           playwright install-deps chromium
 
@@ -74,7 +64,7 @@ jobs:
           echo "HTTP Status: $RESPONSE"
           cat /tmp/response.json
           if [ "$RESPONSE" != "204" ]; then
-            echo "WARNING: Restart fail. Workflow file naam check karo: ${WORKFLOW_FILE}"
+            echo "WARNING: Restart fail."
           else
             echo "Bot restart ho gaya!"
           fi
