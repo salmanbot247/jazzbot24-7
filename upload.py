@@ -579,4 +579,4 @@ def jazz_drive_upload(filename):
                         dialog.locator("text=/upload/i").first.click()
                     fc.value.set_files(os.path.abspath(filename))
                 else:
-                    page.set_input_files("input[type='file']", os.path.abspath(filename)
+                    page.set_input_files("input[type=\"file\"]", os.path.abspath(filenam
