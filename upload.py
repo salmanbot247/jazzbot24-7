@@ -572,6 +572,7 @@ def jazz_drive_upload(filename):
                 time.sleep(2)
             except: pass
 
+            file_input_selector = "input[type=file]"
             try:
                 dialog = page.locator("div[role='dialog']")
                 if dialog.is_visible():
@@ -579,4 +580,4 @@ def jazz_drive_upload(filename):
                         dialog.locator("text=/upload/i").first.click()
                     fc.value.set_files(os.path.abspath(filename))
                 else:
-                    page.set_input_files("input[type=\"file\"]", os.path.abspath(filenam
+                    page.set_input_
