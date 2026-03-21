@@ -23,15 +23,14 @@ jobs:
 
       - name: Install Dependencies
         run: |
-          sudo apt-get install -y aria2 ffmpeg wget curl
+          sudo apt-get update
+          sudo apt-get install -y aria2 ffmpeg wget curl --fix-missing || true
           pip install --upgrade pip
           pip install playwright pyTelegramBotAPI requests yt-dlp
           sudo cp $(python -c "import shutil; print(shutil.which('yt-dlp'))") /usr/local/bin/yt-dlp
           sudo chmod +x /usr/local/bin/yt-dlp
           yt-dlp --version
-          aria2c --version | head -1
-          playwright install chromium
-          playwright install-deps chromium
+          playwright install chromium --with-deps || playwright install chromium
 
       - name: Run Bot
         timeout-minutes: 350
@@ -62,9 +61,9 @@ jobs:
             "https://api.github.com/repos/${{ github.repository }}/actions/workflows/${WORKFLOW_FILE}/dispatches" \
             -d '{"ref":"main"}')
           echo "HTTP Status: $RESPONSE"
-          cat /tmp/response.json
           if [ "$RESPONSE" != "204" ]; then
             echo "WARNING: Restart fail."
           else
             echo "Bot restart ho gaya!"
           fi
+          
