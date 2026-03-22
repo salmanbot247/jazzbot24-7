@@ -402,13 +402,31 @@ def jazz_drive_upload(filename):
             wait_sec = max(60, int(sz * 4))
             msg(f"⏳ Uploading {os.path.basename(filename)}... (~{wait_sec}s)")
             
-            # Har 60 second mein screenshot
+            # Upload complete detect karo - max wait_sec tak
             elapsed = 0
-            interval = 60
+            interval = 30
+            upload_done = False
+            
             while elapsed < wait_sec:
                 time.sleep(interval)
                 elapsed += interval
-                take_screenshot(page, f"📸 Upload progress | {elapsed}s / {wait_sec}s")
+                
+                # "Uploads completed" text check karo
+                try:
+                    completed = page.locator("text=Uploads completed").is_visible()
+                    if completed:
+                        msg(f"✅ Upload detected complete at {elapsed}s!")
+                        upload_done = True
+                        time.sleep(3)
+                        break
+                except: pass
+                
+                # Har 60 second mein screenshot
+                if elapsed % 60 == 0:
+                    take_screenshot(page, f"📸 Upload progress | {elapsed}s / {wait_sec}s")
+            
+            if not upload_done:
+                take_screenshot(page, f"📸 Final state | {elapsed}s")
             
             ctx.storage_state(path="state.json")
 
