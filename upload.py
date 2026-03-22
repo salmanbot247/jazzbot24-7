@@ -401,7 +401,15 @@ def jazz_drive_upload(filename):
             sz = os.path.getsize(filename)/(1024*1024)
             wait_sec = max(60, int(sz * 4))
             msg(f"⏳ Uploading {os.path.basename(filename)}... (~{wait_sec}s)")
-            time.sleep(wait_sec)
+            
+            # Har 60 second mein screenshot
+            elapsed = 0
+            interval = 60
+            while elapsed < wait_sec:
+                time.sleep(interval)
+                elapsed += interval
+                take_screenshot(page, f"📸 Upload progress | {elapsed}s / {wait_sec}s")
+            
             ctx.storage_state(path="state.json")
 
         except Exception as e:
@@ -412,4 +420,4 @@ def jazz_drive_upload(filename):
 if __name__ == "__main__":
     msg("🤖 *BOT ONLINE!*\n\n✅ Ready!\n\n📎 Direct link\n📦 ZIP/RAR link → Auto extract + upload")
     bot.infinity_polling()
-                     
+    
