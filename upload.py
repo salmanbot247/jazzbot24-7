@@ -211,7 +211,30 @@ def worker_loop():
 # ═══════════════════════════════════════
 # ⬇️ Download Helper
 # ═══════════════════════════════════════
+def is_m3u8(url):
+    return '.m3u8' in url.lower() or 'm3u8' in url.lower()
+
 def download_file(url, out_path):
+    # M3U8/HLS stream - ffmpeg use karo
+    if is_m3u8(url):
+        # mp4 extension force karo
+        if not out_path.endswith('.mp4'):
+            out_path = out_path.rsplit('.', 1)[0] + '.mp4'
+        try:
+            print(f"M3U8 detected - using ffmpeg")
+            result = subprocess.run([
+                "ffmpeg", "-y",
+                "-user_agent", WEB_UA,
+                "-i", url,
+                "-c", "copy",
+                "-bsf:a", "aac_adtstoasc",
+                out_path
+            ], capture_output=True, timeout=600)
+            if file_ok(out_path): return True
+        except Exception as e:
+            print(f"ffmpeg error: {e}")
+        return False
+
     # Method 1: aria2c
     try:
         out_dir = os.path.dirname(out_path)
@@ -331,6 +354,10 @@ def process_direct(url):
     out_name = url.split("/")[-1].split("?")[0] or "downloaded_file.mp4"
     out_name = safe_filename(out_name)
     if "." not in out_name: out_name += ".mp4"
+    # M3U8 ko mp4 mein convert karenge
+    if ".m3u8" in out_name.lower():
+        out_name = out_name.lower().replace(".m3u8", ".mp4")
+        out_name = re.sub(r'[.]av[0-9]+', '', out_name)  # .av1 etc remove
     out_path = f"/tmp/{out_name}"
 
     clean(out_path)
@@ -438,4 +465,4 @@ def jazz_drive_upload(filename):
 if __name__ == "__main__":
     msg("🤖 *BOT ONLINE!*\n\n✅ Ready!\n\n📎 Direct link\n📦 ZIP/RAR link → Auto extract + upload")
     bot.infinity_polling()
-    
+        
