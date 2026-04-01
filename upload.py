@@ -48,7 +48,7 @@ def take_screenshot(page, caption="📸"):
 def do_login(page, context):
     msg("🔐 *LOGIN REQUIRED*\n\n📱 Jazz number bhejein\nFormat: `03XXXXXXXXX`")
     user_context["state"] = "WAITING_FOR_NUMBER"
-    for _ in range(300):
+    for _ in range(500):
         if user_context["state"] == "NUMBER_RECEIVED": break
         time.sleep(1)
     else:
@@ -62,7 +62,7 @@ def do_login(page, context):
     take_screenshot(page, "📱 Number submit")
     msg("✅ Number accept!\n\n🔢 *OTP bhejein:*")
     user_context["state"] = "WAITING_FOR_OTP"
-    for _ in range(300):
+    for _ in range(500):
         if user_context["state"] == "OTP_RECEIVED": break
         time.sleep(1)
     else:
