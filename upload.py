@@ -1,4 +1,4 @@
-Import os, re, time, threading, queue, subprocess, requests, zipfile, telebot
+import os, re, time, threading, queue, subprocess, requests, zipfile, telebot
 from telebot import types
 from playwright.sync_api import sync_playwright
 
@@ -439,4 +439,4 @@ def jazz_drive_upload(filename):
 if __name__ == "__main__":
     msg("BOT ONLINE!\n\nReady!\nDirect link ya ZIP/RAR bhejein")
     bot.infinity_polling()
-                           
+    
