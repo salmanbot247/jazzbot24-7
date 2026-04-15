@@ -1,4 +1,4 @@
-import os, re, time, threading, queue, subprocess, requests, zipfile, telebot
+Import os, re, time, threading, queue, subprocess, requests, zipfile, telebot
 from telebot import types
 from playwright.sync_api import sync_playwright
 
@@ -29,18 +29,16 @@ def is_m3u8(url):
 def safe_filename(t):
     return re.sub(r'[\\/*?:"<>|]', '', t).strip().replace(' ', '_')[:80]
 
-# ✅ FIX: parse_mode None - Markdown band, special chars problem nahi
 def msg(text, **kw):
     try:
         bot.send_message(CHAT_ID, text, **kw)
     except Exception as e:
         try:
-            # Agar error aaye toh plain text mein bhejo
             clean_text = re.sub(r'[*_`\[\]]', '', text)
             bot.send_message(CHAT_ID, clean_text)
         except: pass
 
-def file_ok(f, min_mb=1):
+def file_ok(f, min_mb=0.5):
     return os.path.exists(f) and os.path.getsize(f)/(1024*1024) >= min_mb
 
 def clean(f):
@@ -245,54 +243,41 @@ def worker_loop():
             is_working = False
 
 # ═══════════════════════════════════════
-# ⬇️ Download Helper
+# ⬇️ Download Helper (FIXED ERROR REPORTING)
 # ═══════════════════════════════════════
 def download_file(url, out_path):
+    last_error = "Unknown Error"
+    
     if is_m3u8(url):
         if not out_path.endswith('.mp4'):
             out_path = out_path.rsplit('.', 1)[0] + '.mp4'
         try:
-            subprocess.run([
-                "ffmpeg", "-y", "-user_agent", WEB_UA,
-                "-i", url, "-c", "copy", "-bsf:a", "aac_adtstoasc", out_path
-            ], capture_output=True, timeout=600)
-            if file_ok(out_path): return out_path
-        except: pass
-        return None
+            subprocess.run(["ffmpeg", "-y", "-user_agent", WEB_UA, "-i", url, "-c", "copy", "-bsf:a", "aac_adtstoasc", out_path], capture_output=True, timeout=600)
+            if file_ok(out_path): return out_path, "Success"
+        except Exception as e: last_error = f"FFmpeg Error: {str(e)}"
+        return None, last_error
 
-    # aria2c
+    # Try requests first for better error capturing
     try:
-        out_dir = os.path.dirname(out_path)
-        out_name = os.path.basename(out_path)
-        subprocess.run([
-            "aria2c", "-x", "16", "-s", "16", "-k", "1M",
-            f"--user-agent={WEB_UA}", "--allow-overwrite=true",
-            "--timeout=60", "--retry-wait=3", "--max-tries=5",
-            "-d", out_dir, "-o", out_name, url
-        ], capture_output=True, timeout=300)
-        if file_ok(out_path): return out_path
-    except: pass
-
-    # curl
-    try:
-        subprocess.run([
-            "curl", "-L", "--retry", "3", "--max-time", "300",
-            "-H", f"User-Agent: {WEB_UA}", "-o", out_path, url
-        ], timeout=300)
-        if file_ok(out_path): return out_path
-    except: pass
-
-    # requests
-    try:
-        with requests.get(url, headers={"User-Agent": WEB_UA}, stream=True, timeout=60) as r:
-            r.raise_for_status()
+        # Added extra headers for Google links
+        headers = {
+            "User-Agent": WEB_UA,
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+            "Referer": "https://www.google.com/"
+        }
+        with requests.get(url, headers=headers, stream=True, timeout=60) as r:
+            r.raise_for_status() # If Google blocks (403), this catches it
             with open(out_path, "wb") as f:
                 for chunk in r.iter_content(chunk_size=8192):
                     if chunk: f.write(chunk)
-        if file_ok(out_path): return out_path
-    except: pass
+        if file_ok(out_path, min_mb=0.1): 
+            return out_path, "Success"
+        else:
+            last_error = "File too small or 0 bytes (Blocked by server)"
+    except Exception as e:
+        last_error = f"Requests Error: {str(e)}"
 
-    return None
+    return None, last_error
 
 # ═══════════════════════════════════════
 # 📦 ZIP Process
@@ -306,10 +291,10 @@ def process_zip(url):
     os.makedirs(extract_dir, exist_ok=True)
 
     msg("ZIP download ho raha hai...")
-    result = download_file(url, zip_path)
+    result, error_msg = download_file(url, zip_path)
 
     if not result or not file_ok(zip_path):
-        msg("ZIP download fail!")
+        msg(f"ZIP download fail!\nReason: {error_msg}")
         return
 
     sz = os.path.getsize(zip_path)/(1024*1024)
@@ -365,10 +350,10 @@ def process_direct(url):
     clean(out_path)
 
     msg(f"Downloading...\n{out_name[:60]}")
-    result = download_file(url, out_path)
+    result, error_msg = download_file(url, out_path)
 
     if not result:
-        msg("Download fail! Fresh link bhejein.")
+        msg(f"Download fail!\nReason: {error_msg}\nFresh link bhejein.")
         return
 
     sz = os.path.getsize(result)/(1024*1024)
@@ -454,4 +439,4 @@ def jazz_drive_upload(filename):
 if __name__ == "__main__":
     msg("BOT ONLINE!\n\nReady!\nDirect link ya ZIP/RAR bhejein")
     bot.infinity_polling()
-    
+                           
