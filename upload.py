@@ -1,4 +1,4 @@
-import os, re, time, threading, queue, subprocess, requests, zipfile, telebot
+Import os, re, time, threading, queue, subprocess, requests, zipfile, telebot
 from telebot import types
 from playwright.sync_api import sync_playwright
 
@@ -243,37 +243,64 @@ def worker_loop():
             is_working = False
 
 # ═══════════════════════════════════════
-# ⬇️ Download Helper (FIXED ERROR REPORTING)
+# ⬇️ MULTI-ENGINE DOWNLOADER (NEW METHODS)
 # ═══════════════════════════════════════
 def download_file(url, out_path):
     last_error = "Unknown Error"
+    clean(out_path)
     
+    # Engine 1: FFmpeg (For live streams/m3u8)
     if is_m3u8(url):
-        if not out_path.endswith('.mp4'):
-            out_path = out_path.rsplit('.', 1)[0] + '.mp4'
+        if not out_path.endswith('.mp4'): out_path = out_path.rsplit('.', 1)[0] + '.mp4'
+        msg("⚙️ Engine 1: FFmpeg Stream Downloader...")
         try:
             subprocess.run(["ffmpeg", "-y", "-user_agent", WEB_UA, "-i", url, "-c", "copy", "-bsf:a", "aac_adtstoasc", out_path], capture_output=True, timeout=600)
             if file_ok(out_path): return out_path, "Success"
         except Exception as e: last_error = f"FFmpeg Error: {str(e)}"
         return None, last_error
 
-    # Try requests first for better error capturing
+    # Engine 2: Advanced cURL (Spoofing)
+    msg("⚙️ Engine 2: Advanced cURL...")
     try:
-        # Added extra headers for Google links
-        headers = {
-            "User-Agent": WEB_UA,
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
-            "Referer": "https://www.google.com/"
-        }
+        subprocess.run([
+            "curl", "-L", "-k", "--retry", "3",
+            "-H", f"User-Agent: {WEB_UA}",
+            "-H", "Accept-Language: en-US,en;q=0.9",
+            "-H", "Referer: https://www.google.com/",
+            "-o", out_path, url
+        ], timeout=300)
+        if file_ok(out_path, min_mb=0.1): return out_path, "Success"
+    except Exception as e: last_error = f"cURL error: {e}"
+
+    clean(out_path)
+
+    # Engine 3: WGET (Linux Native)
+    msg("⚙️ Engine 3: Wget Downloader...")
+    try:
+        subprocess.run([
+            "wget", "-q", "--tries=3", "--timeout=120",
+            "--header", f"User-Agent: {WEB_UA}",
+            "--header", "Referer: https://www.google.com/",
+            "-O", out_path, url
+        ], timeout=300)
+        if file_ok(out_path, min_mb=0.1): return out_path, "Success"
+    except Exception as e: last_error = f"Wget error: {e}"
+
+    clean(out_path)
+
+    # Engine 4: Python Requests
+    msg("⚙️ Engine 4: Requests Fallback...")
+    try:
+        headers = {"User-Agent": WEB_UA, "Referer": "https://www.google.com/"}
         with requests.get(url, headers=headers, stream=True, timeout=60) as r:
-            r.raise_for_status() # If Google blocks (403), this catches it
+            r.raise_for_status() 
             with open(out_path, "wb") as f:
                 for chunk in r.iter_content(chunk_size=8192):
                     if chunk: f.write(chunk)
         if file_ok(out_path, min_mb=0.1): 
             return out_path, "Success"
         else:
-            last_error = "File too small or 0 bytes (Blocked by server)"
+            last_error = "Server ne access deny kardia (IP Mismatch / Blocked)"
     except Exception as e:
         last_error = f"Requests Error: {str(e)}"
 
@@ -353,11 +380,11 @@ def process_direct(url):
     result, error_msg = download_file(url, out_path)
 
     if not result:
-        msg(f"Download fail!\nReason: {error_msg}\nFresh link bhejein.")
+        msg(f"❌ Download fail!\nReason: {error_msg}\nFresh link bhejein.")
         return
 
     sz = os.path.getsize(result)/(1024*1024)
-    msg(f"Downloaded! {sz:.1f} MB\nJazzDrive upload ho raha hai...")
+    msg(f"✅ Downloaded! {sz:.1f} MB\nJazzDrive upload ho raha hai...")
     jazz_drive_upload(result)
     clean(result)
 
