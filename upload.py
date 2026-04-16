@@ -1,4 +1,4 @@
-Import os, re, time, threading, queue, subprocess, requests, zipfile, telebot
+import os, re, time, threading, queue, subprocess, requests, zipfile, telebot
 from telebot import types
 from playwright.sync_api import sync_playwright
 
