@@ -538,4 +538,4 @@ def jazz_drive_upload(filename, folder_name=""):
 
             page.wait_for_selector("input[type='file']", state="attached")
             with page.expect_file_chooser() as fc_info:
-                page.click
+                page.click("xpath=/html/body/div[2]/div[3]/div/div/form/div/div/div/div[1]")
