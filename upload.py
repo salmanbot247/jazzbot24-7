@@ -9,7 +9,7 @@ bot = telebot.TeleBot(TOKEN)
 task_queue = queue.Queue()
 is_working = False
 worker_lock = threading.Lock()
-user_context = {"state": "IDLE", "number": None, "otp": None}
+user_context = {"state": "IDLE", "number": None, "otp": None, "pending_link": None, "pending_type": None}
 
 BROWSER_ARGS = ["--disable-gpu", "--no-sandbox", "--disable-dev-shm-usage", "--single-process"]
 WEB_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36"
@@ -197,18 +197,29 @@ def handle(m):
         bot.reply_to(m, "OTP receive hua...")
         return
 
-    if text.startswith("http"):
-        if is_zip_url(text):
-            task_queue.put({"link": text, "type": "zip"})
-            bot.reply_to(m, f"ZIP/RAR link add!\nQueue: {task_queue.qsize()}")
-        else:
-            task_queue.put({"link": text, "type": "direct"})
-            bot.reply_to(m, f"Direct link add!\nQueue: {task_queue.qsize()}")
-
+    if user_context["state"] == "WAITING_FOR_FOLDER":
+        folder_name = text if text.strip().upper() != "ROOT" and text.strip() != "" else ""
+        link = user_context["pending_link"]
+        ltype = user_context["pending_type"]
+        user_context["pending_link"] = None
+        user_context["pending_type"] = None
+        user_context["state"] = "IDLE"
+        task_queue.put({"link": link, "type": ltype, "folder": folder_name})
+        folder_info = f"Folder: {folder_name}" if folder_name else "Folder: Root (default)"
+        bot.reply_to(m, f"Task add!\n{folder_info}\nQueue: {task_queue.qsize()}")
         with worker_lock:
             if not is_working:
                 is_working = True
                 threading.Thread(target=worker_loop, daemon=True).start()
+        return
+
+    if text.startswith("http"):
+        ltype = "zip" if is_zip_url(text) else "direct"
+        user_context["pending_link"] = text
+        user_context["pending_type"] = ltype
+        user_context["state"] = "WAITING_FOR_FOLDER"
+        bot.reply_to(m, f"{'ZIP/RAR' if ltype == 'zip' else 'Direct'} link mila!\n\n📁 Folder name bhejein\n(ya 'root' likhein agar koi folder nahi chahiye)")
+
     else:
         bot.reply_to(m, "Link bhejein ya /start dekho")
 
@@ -228,9 +239,9 @@ def worker_loop():
             msg(f"PROCESSING...\n\n{short}")
             try:
                 if item["type"] == "zip":
-                    process_zip(item["link"])
+                    process_zip(item["link"], item.get("folder", ""))
                 else:
-                    process_direct(item["link"])
+                    process_direct(item["link"], item.get("folder", ""))
             except Exception as e:
                 msg(f"Error: {str(e)[:150]}")
             finally:
@@ -309,7 +320,7 @@ def download_file(url, out_path):
 # ═══════════════════════════════════════
 # 📦 ZIP Process
 # ═══════════════════════════════════════
-def process_zip(url):
+def process_zip(url, folder_name=""):
     import shutil
     zip_path = "/tmp/series_download.zip"
     extract_dir = "/tmp/series_extracted"
@@ -357,7 +368,7 @@ def process_zip(url):
         fname = os.path.basename(video_path)
         fsize = os.path.getsize(video_path)/(1024*1024)
         msg(f"Episode {i}/{len(video_files)}\n{fname}\n{fsize:.1f} MB")
-        jazz_drive_upload(video_path)
+        jazz_drive_upload(video_path, folder_name)
         clean(video_path)
         msg(f"Episode {i}/{len(video_files)} done!")
 
@@ -367,7 +378,7 @@ def process_zip(url):
 # ═══════════════════════════════════════
 # 📎 Direct Link Process
 # ═══════════════════════════════════════
-def process_direct(url):
+def process_direct(url, folder_name=""):
     out_name = url.split("/")[-1].split("?")[0] or "file.mp4"
     out_name = safe_filename(out_name)
     if "." not in out_name: out_name += ".mp4"
@@ -385,13 +396,13 @@ def process_direct(url):
 
     sz = os.path.getsize(result)/(1024*1024)
     msg(f"✅ Downloaded! {sz:.1f} MB\nJazzDrive upload ho raha hai...")
-    jazz_drive_upload(result)
+    jazz_drive_upload(result, folder_name)
     clean(result)
 
 # ═══════════════════════════════════════
 # ☁️ JazzDrive Upload
 # ═══════════════════════════════════════
-def jazz_drive_upload(filename):
+def jazz_drive_upload(filename, folder_name=""):
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True, args=BROWSER_ARGS)
         ctx = browser.new_context(
@@ -409,6 +420,15 @@ def jazz_drive_upload(filename):
                 if not ok: msg("Login fail."); return
                 page.goto("https://cloud.jazzdrive.com.pk/", wait_until="networkidle", timeout=90000)
                 time.sleep(3)
+
+            # 📁 Folder navigate karein agar diya gaya ho
+            if folder_name and folder_name.strip().upper() != "ROOT" and folder_name.strip() != "":
+                try:
+                    page.get_by_text(folder_name.strip(), exact=False).first.click(timeout=5000)
+                    time.sleep(3)
+                    msg(f"📁 Folder open: {folder_name}")
+                except:
+                    msg(f"⚠️ Folder '{folder_name}' nahi mila, root mein upload ho raha hai...")
 
             ctx.storage_state(path="state.json")
             abs_path = os.path.abspath(filename)
