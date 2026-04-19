@@ -11,7 +11,6 @@ is_working = False
 worker_lock = threading.Lock()
 user_context = {"state": "IDLE", "number": None, "otp": None, "pending_link": None, "pending_type": None, "pending_quality": "1080"}
 
-# Colab se response receive karne ke liye
 colab_response = {"value": None, "event": threading.Event()}
 
 BROWSER_ARGS = ["--disable-gpu", "--no-sandbox", "--disable-dev-shm-usage", "--single-process"]
@@ -54,9 +53,6 @@ def take_screenshot(page, caption="📸"):
         os.remove("s.png")
     except: pass
 
-# ═══════════════════════════════════════
-# 🔑 Login
-# ═══════════════════════════════════════
 def do_login(page, context):
     msg("LOGIN REQUIRED\n\nJazz number bhejein\nFormat: 03XXXXXXXXX")
     user_context["state"] = "WAITING_FOR_NUMBER"
@@ -66,7 +62,6 @@ def do_login(page, context):
     else:
         msg("Timeout! Task cancel.")
         return False
-
     page.locator("#msisdn").fill(user_context["number"])
     time.sleep(1)
     page.locator("#signinbtn").first.click()
@@ -80,13 +75,11 @@ def do_login(page, context):
     else:
         msg("Timeout! Task cancel.")
         return False
-
     for i, digit in enumerate(user_context["otp"].strip()[:6], 1):
         try:
             f = page.locator(f"//input[@aria-label='Digit {i}']")
             if f.is_visible(): f.fill(digit); time.sleep(0.2)
         except: pass
-
     time.sleep(5)
     take_screenshot(page, "OTP submit")
     context.storage_state(path="state.json")
@@ -116,9 +109,6 @@ def check_login_status():
         finally:
             browser.close()
 
-# ═══════════════════════════════════════
-# 🤖 Bot Commands
-# ═══════════════════════════════════════
 @bot.message_handler(commands=["start"])
 def welcome(m):
     msg(
@@ -188,7 +178,6 @@ def handle(m):
     global is_working
     text = (m.text or "").strip()
 
-    # Colab ka response aaya
     if text.startswith("[YT_RES]") or text.startswith("[YT_ERR]"):
         colab_response["value"] = text
         colab_response["event"].set()
@@ -234,20 +223,15 @@ def handle(m):
         ltype = "youtube" if is_yt else ("zip" if is_zip_url(text) else "direct")
         user_context["pending_link"] = text
         user_context["pending_type"] = ltype
-
         if is_yt:
             user_context["state"] = "WAITING_FOR_YT_QUALITY"
             bot.reply_to(m, "YouTube link mila!\n\n🎬 Quality choose karo:\n1. 4K (2160p)\n2. 2K (1440p)\n3. Full HD (1080p)\n4. HD (720p)\n5. SD (480p)\n6. Low (360p)")
         else:
             user_context["state"] = "WAITING_FOR_FOLDER"
             bot.reply_to(m, f"{'ZIP/RAR' if ltype == 'zip' else 'Direct'} link mila!\n\n📁 Folder name bhejein\n(ya 'root' likhein agar koi folder nahi chahiye)")
-
     else:
         bot.reply_to(m, "Link bhejein ya /start dekho")
 
-# ═══════════════════════════════════════
-# 🔄 Worker
-# ═══════════════════════════════════════
 queue_paused = False
 
 def worker_loop():
@@ -277,73 +261,45 @@ def worker_loop():
         with worker_lock:
             is_working = False
 
-# ═══════════════════════════════════════
-# ⬇️ MULTI-ENGINE DOWNLOADER (NEW METHODS)
-# ═══════════════════════════════════════
 def download_file(url, out_path):
     last_error = "Unknown Error"
     clean(out_path)
-    
-    # Engine 1: FFmpeg (For live streams/m3u8)
     if is_m3u8(url):
         if not out_path.endswith('.mp4'): out_path = out_path.rsplit('.', 1)[0] + '.mp4'
         msg("⚙️ Engine 1: FFmpeg Stream Downloader...")
-              try:
+        try:
             subprocess.run(["ffmpeg", "-y", "-user_agent", WEB_UA, "-i", url, "-c", "copy", "-bsf:a", "aac_adtstoasc", out_path], capture_output=True, timeout=600)
             if file_ok(out_path): return out_path, "Success"
         except Exception as e: last_error = f"FFmpeg Error: {str(e)}"
         return None, last_error
-
-    # Engine 2: Advanced cURL (Spoofing)
     msg("⚙️ Engine 2: Advanced cURL...")
     try:
-        subprocess.run([
-            "curl", "-L", "-k", "--retry", "3",
-            "-H", f"User-Agent: {WEB_UA}",
-            "-H", "Accept-Language: en-US,en;q=0.9",
-            "-H", "Referer: https://www.google.com/",
-            "-o", out_path, url
-        ], timeout=300)
+        subprocess.run(["curl", "-L", "-k", "--retry", "3", "-H", f"User-Agent: {WEB_UA}", "-H", "Accept-Language: en-US,en;q=0.9", "-H", "Referer: https://www.google.com/", "-o", out_path, url], timeout=300)
         if file_ok(out_path, min_mb=0.1): return out_path, "Success"
     except Exception as e: last_error = f"cURL error: {e}"
-
     clean(out_path)
-
-    # Engine 3: WGET (Linux Native)
     msg("⚙️ Engine 3: Wget Downloader...")
     try:
-        subprocess.run([
-            "wget", "-q", "--tries=3", "--timeout=120",
-            "--header", f"User-Agent: {WEB_UA}",
-            "--header", "Referer: https://www.google.com/",
-            "-O", out_path, url
-        ], timeout=300)
+        subprocess.run(["wget", "-q", "--tries=3", "--timeout=120", "--header", f"User-Agent: {WEB_UA}", "--header", "Referer: https://www.google.com/", "-O", out_path, url], timeout=300)
         if file_ok(out_path, min_mb=0.1): return out_path, "Success"
     except Exception as e: last_error = f"Wget error: {e}"
-
     clean(out_path)
-
-    # Engine 4: Python Requests
     msg("⚙️ Engine 4: Requests Fallback...")
     try:
         headers = {"User-Agent": WEB_UA, "Referer": "https://www.google.com/"}
         with requests.get(url, headers=headers, stream=True, timeout=60) as r:
-            r.raise_for_status() 
+            r.raise_for_status()
             with open(out_path, "wb") as f:
                 for chunk in r.iter_content(chunk_size=8192):
                     if chunk: f.write(chunk)
-        if file_ok(out_path, min_mb=0.1): 
+        if file_ok(out_path, min_mb=0.1):
             return out_path, "Success"
         else:
             last_error = "Server ne access deny kardia (IP Mismatch / Blocked)"
     except Exception as e:
         last_error = f"Requests Error: {str(e)}"
-
     return None, last_error
 
-# ═══════════════════════════════════════
-# 📦 ZIP Process
-# ═══════════════════════════════════════
 def process_zip(url, folder_name=""):
     import shutil
     zip_path = "/tmp/series_download.zip"
@@ -351,17 +307,13 @@ def process_zip(url, folder_name=""):
     clean(zip_path)
     if os.path.exists(extract_dir): shutil.rmtree(extract_dir)
     os.makedirs(extract_dir, exist_ok=True)
-
     msg("ZIP download ho raha hai...")
     result, error_msg = download_file(url, zip_path)
-
     if not result or not file_ok(zip_path):
         msg(f"ZIP download fail!\nReason: {error_msg}")
         return
-
     sz = os.path.getsize(zip_path)/(1024*1024)
     msg(f"Downloaded! {sz:.1f} MB\nExtracting...")
-
     try:
         if zipfile.is_zipfile(zip_path):
             with zipfile.ZipFile(zip_path, "r") as zf:
@@ -371,23 +323,18 @@ def process_zip(url, folder_name=""):
     except Exception as e:
         msg(f"Extract fail: {str(e)[:100]}")
         return
-
     clean(zip_path)
-
     video_files = []
     for root, dirs, files in os.walk(extract_dir):
         for f in sorted(files):
             if is_video_file(f):
                 video_files.append(os.path.join(root, f))
-
     if not video_files:
         msg("ZIP mein koi video nahi mili!")
         return
-
     list_text = "\n".join([f"{i+1}. {os.path.basename(v)}" for i, v in enumerate(video_files[:10])])
     if len(video_files) > 10: list_text += "\n..."
     msg(f"{len(video_files)} episodes mile:\n\n{list_text}\n\nUpload shuru...")
-
     for i, video_path in enumerate(video_files, 1):
         fname = os.path.basename(video_path)
         fsize = os.path.getsize(video_path)/(1024*1024)
@@ -395,62 +342,39 @@ def process_zip(url, folder_name=""):
         jazz_drive_upload(video_path, folder_name)
         clean(video_path)
         msg(f"Episode {i}/{len(video_files)} done!")
-
     shutil.rmtree(extract_dir, ignore_errors=True)
     msg(f"SERIES COMPLETE!\n{len(video_files)} episodes uploaded!")
 
-# ═══════════════════════════════════════
-# 🎬 YOUTUBE VIA COLAB
-# ═══════════════════════════════════════
 def download_youtube_via_colab(yt_url, quality, timeout=300):
     msg(f"📡 Colab ko request bhej raha hoon...\n⏳ Max wait: {timeout//60} min")
-
-    # Event reset karo
     colab_response["value"] = None
     colab_response["event"].clear()
-
-    # Colab ko request bhejo
     bot.send_message(CHAT_ID, f"[YT_REQ] {quality}|{yt_url}")
-
-    # Colab ke response ka wait karo
     got_response = colab_response["event"].wait(timeout=timeout)
-
     if not got_response:
         msg("⏰ Colab ne jawab nahi diya! Colab poller chalu hai?")
         return None
-
     response = colab_response["value"]
-
     if response.startswith("[YT_ERR]"):
         msg(f"❌ Colab error: {response}")
         return None
-
     cdn_urls = response.replace("[YT_RES] ", "").split("|||")
     cdn_urls = [u for u in cdn_urls if u.startswith("http")]
-
     if not cdn_urls:
         msg("❌ CDN URL empty aaya")
         return None
-
     msg(f"✅ CDN URL mili! Download shuru ({len(cdn_urls)} stream)...")
     return download_from_cdn(cdn_urls)
 
 def download_from_cdn(cdn_urls):
     os.makedirs("/tmp/yt_downloads", exist_ok=True)
     output = f"/tmp/yt_downloads/yt_{int(time.time())}.mp4"
-
     try:
         if len(cdn_urls) >= 2:
-            # Video + Audio alag — ffmpeg se merge
-            cmd = ["ffmpeg", "-y",
-                   "-i", cdn_urls[0],
-                   "-i", cdn_urls[1],
-                   "-c", "copy", output]
+            cmd = ["ffmpeg", "-y", "-i", cdn_urls[0], "-i", cdn_urls[1], "-c", "copy", output]
         else:
             cmd = ["ffmpeg", "-y", "-i", cdn_urls[0], "-c", "copy", output]
-
         subprocess.run(cmd, capture_output=True, timeout=3600)
-
         if os.path.exists(output) and os.path.getsize(output) > 1024:
             size = os.path.getsize(output) / (1024 * 1024)
             msg(f"✅ Download complete! {size:.1f} MB")
@@ -473,9 +397,6 @@ def process_youtube(url, quality, folder_name=""):
     else:
         msg("❌ YouTube download fail!\nColab poller chalu karo phir dobara bhejo.")
 
-# ═══════════════════════════════════════
-# 📎 Direct Link Process
-# ═══════════════════════════════════════
 def process_direct(url, folder_name=""):
     out_name = url.split("/")[-1].split("?")[0] or "file.mp4"
     out_name = safe_filename(out_name)
@@ -484,22 +405,16 @@ def process_direct(url, folder_name=""):
         out_name = re.sub(r'[.]av[0-9]+', '', out_name.lower().replace(".m3u8", ".mp4"))
     out_path = f"/tmp/{out_name}"
     clean(out_path)
-
     msg(f"Downloading...\n{out_name[:60]}")
     result, error_msg = download_file(url, out_path)
-
     if not result:
         msg(f"❌ Download fail!\nReason: {error_msg}\nFresh link bhejein.")
         return
-
     sz = os.path.getsize(result)/(1024*1024)
     msg(f"✅ Downloaded! {sz:.1f} MB\nJazzDrive upload ho raha hai...")
     jazz_drive_upload(result, folder_name)
     clean(result)
 
-# ═══════════════════════════════════════
-# ☁️ JazzDrive Upload
-# ═══════════════════════════════════════
 def jazz_drive_upload(filename, folder_name=""):
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True, args=BROWSER_ARGS)
@@ -511,15 +426,12 @@ def jazz_drive_upload(filename, folder_name=""):
         try:
             page.goto("https://cloud.jazzdrive.com.pk/#folders", wait_until="networkidle", timeout=90000)
             time.sleep(5)
-
             if page.locator("#msisdn").is_visible():
                 msg("Session expire! Login karo...")
                 ok = do_login(page, ctx)
                 if not ok: msg("Login fail."); return
                 page.goto("https://cloud.jazzdrive.com.pk/#folders", wait_until="networkidle", timeout=90000)
                 time.sleep(5)
-
-            # 📁 Folder navigate karein agar diya gaya ho
             if folder_name and folder_name.strip().upper() != "ROOT" and folder_name.strip() != "":
                 try:
                     page.get_by_text(folder_name.strip(), exact=False).first.click(timeout=5000)
@@ -527,30 +439,23 @@ def jazz_drive_upload(filename, folder_name=""):
                     msg(f"📁 Folder open: {folder_name}")
                 except:
                     msg(f"⚠️ Folder '{folder_name}' nahi mila, root mein upload ho raha hai...")
-
             ctx.storage_state(path="state.json")
             abs_path = os.path.abspath(filename)
-
-            # Upload button click (Colab wala XPath)
             for sel in ["xpath=/html/body/div/div/div[1]/div/header/div/div/button", "button:has-text('Upload')"]:
                 try: page.click(sel, timeout=5000); break
                 except: pass
-
             page.wait_for_selector("input[type='file']", state="attached")
             with page.expect_file_chooser() as fc_info:
                 page.click("xpath=/html/body/div[2]/div[3]/div/div/form/div/div/div/div[1]")
             fc_info.value.set_files(abs_path)
-
             time.sleep(3)
             try:
                 yes_btn = page.get_by_text("Yes", exact=True)
                 if yes_btn.is_visible(): yes_btn.click()
             except: pass
-
             sz = os.path.getsize(filename)/(1024*1024)
             wait_sec = max(60, int(sz * 4))
             msg(f"Uploading {os.path.basename(filename)[:50]}... (~{wait_sec}s)")
-
             elapsed = 0
             upload_done = False
             while elapsed < wait_sec:
@@ -564,17 +469,13 @@ def jazz_drive_upload(filename, folder_name=""):
                 except: pass
                 if elapsed % 60 == 0:
                     take_screenshot(page, f"Upload progress {elapsed}s/{wait_sec}s")
-
             if not upload_done:
                 take_screenshot(page, f"Final state {elapsed}s")
-
             ctx.storage_state(path="state.json")
-
         except Exception as e:
             msg(f"Upload error: {str(e)[:200]}")
         finally:
-            browser.close()
-
+            browser.close
 if __name__ == "__main__":
     msg("BOT ONLINE!\n\nReady!\nDirect link ya ZIP/RAR bhejein")
     bot.infinity_polling()
