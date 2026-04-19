@@ -9,7 +9,10 @@ bot = telebot.TeleBot(TOKEN)
 task_queue = queue.Queue()
 is_working = False
 worker_lock = threading.Lock()
-user_context = {"state": "IDLE", "number": None, "otp": None, "pending_link": None, "pending_type": None}
+user_context = {"state": "IDLE", "number": None, "otp": None, "pending_link": None, "pending_type": None, "pending_quality": "1080"}
+
+# Colab se response receive karne ke liye
+colab_response = {"value": None, "event": threading.Event()}
 
 BROWSER_ARGS = ["--disable-gpu", "--no-sandbox", "--disable-dev-shm-usage", "--single-process"]
 WEB_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36"
@@ -185,6 +188,12 @@ def handle(m):
     global is_working
     text = (m.text or "").strip()
 
+    # Colab ka response aaya
+    if text.startswith("[YT_RES]") or text.startswith("[YT_ERR]"):
+        colab_response["value"] = text
+        colab_response["event"].set()
+        return
+
     if user_context["state"] == "WAITING_FOR_NUMBER":
         user_context["number"] = text
         user_context["state"] = "NUMBER_RECEIVED"
@@ -197,6 +206,13 @@ def handle(m):
         bot.reply_to(m, "OTP receive hua...")
         return
 
+    if user_context["state"] == "WAITING_FOR_YT_QUALITY":
+        q_map = {"1": "2160", "2": "1440", "3": "1080", "4": "720", "5": "480", "6": "360"}
+        user_context["pending_quality"] = q_map.get(text.strip(), "1080")
+        user_context["state"] = "WAITING_FOR_FOLDER"
+        bot.reply_to(m, f"Quality: {user_context['pending_quality']}p ✅\n\n📁 Folder name bhejein\n(ya 'root' likhein)")
+        return
+
     if user_context["state"] == "WAITING_FOR_FOLDER":
         folder_name = text if text.strip().upper() != "ROOT" and text.strip() != "" else ""
         link = user_context["pending_link"]
@@ -204,7 +220,7 @@ def handle(m):
         user_context["pending_link"] = None
         user_context["pending_type"] = None
         user_context["state"] = "IDLE"
-        task_queue.put({"link": link, "type": ltype, "folder": folder_name})
+        task_queue.put({"link": link, "type": ltype, "folder": folder_name, "quality": user_context.get("pending_quality", "1080")})
         folder_info = f"Folder: {folder_name}" if folder_name else "Folder: Root (default)"
         bot.reply_to(m, f"Task add!\n{folder_info}\nQueue: {task_queue.qsize()}")
         with worker_lock:
@@ -214,11 +230,17 @@ def handle(m):
         return
 
     if text.startswith("http"):
-        ltype = "zip" if is_zip_url(text) else "direct"
+        is_yt = "youtube.com" in text or "youtu.be" in text
+        ltype = "youtube" if is_yt else ("zip" if is_zip_url(text) else "direct")
         user_context["pending_link"] = text
         user_context["pending_type"] = ltype
-        user_context["state"] = "WAITING_FOR_FOLDER"
-        bot.reply_to(m, f"{'ZIP/RAR' if ltype == 'zip' else 'Direct'} link mila!\n\n📁 Folder name bhejein\n(ya 'root' likhein agar koi folder nahi chahiye)")
+
+        if is_yt:
+            user_context["state"] = "WAITING_FOR_YT_QUALITY"
+            bot.reply_to(m, "YouTube link mila!\n\n🎬 Quality choose karo:\n1. 4K (2160p)\n2. 2K (1440p)\n3. Full HD (1080p)\n4. HD (720p)\n5. SD (480p)\n6. Low (360p)")
+        else:
+            user_context["state"] = "WAITING_FOR_FOLDER"
+            bot.reply_to(m, f"{'ZIP/RAR' if ltype == 'zip' else 'Direct'} link mila!\n\n📁 Folder name bhejein\n(ya 'root' likhein agar koi folder nahi chahiye)")
 
     else:
         bot.reply_to(m, "Link bhejein ya /start dekho")
@@ -240,6 +262,8 @@ def worker_loop():
             try:
                 if item["type"] == "zip":
                     process_zip(item["link"], item.get("folder", ""))
+                elif item["type"] == "youtube":
+                    process_youtube(item["link"], item.get("quality", "1080"), item.get("folder", ""))
                 else:
                     process_direct(item["link"], item.get("folder", ""))
             except Exception as e:
@@ -376,6 +400,80 @@ def process_zip(url, folder_name=""):
     msg(f"SERIES COMPLETE!\n{len(video_files)} episodes uploaded!")
 
 # ═══════════════════════════════════════
+# 🎬 YOUTUBE VIA COLAB
+# ═══════════════════════════════════════
+def download_youtube_via_colab(yt_url, quality, timeout=300):
+    msg(f"📡 Colab ko request bhej raha hoon...\n⏳ Max wait: {timeout//60} min")
+
+    # Event reset karo
+    colab_response["value"] = None
+    colab_response["event"].clear()
+
+    # Colab ko request bhejo
+    bot.send_message(CHAT_ID, f"[YT_REQ] {quality}|{yt_url}")
+
+    # Colab ke response ka wait karo
+    got_response = colab_response["event"].wait(timeout=timeout)
+
+    if not got_response:
+        msg("⏰ Colab ne jawab nahi diya! Colab poller chalu hai?")
+        return None
+
+    response = colab_response["value"]
+
+    if response.startswith("[YT_ERR]"):
+        msg(f"❌ Colab error: {response}")
+        return None
+
+    cdn_urls = response.replace("[YT_RES] ", "").split("|||")
+    cdn_urls = [u for u in cdn_urls if u.startswith("http")]
+
+    if not cdn_urls:
+        msg("❌ CDN URL empty aaya")
+        return None
+
+    msg(f"✅ CDN URL mili! Download shuru ({len(cdn_urls)} stream)...")
+    return download_from_cdn(cdn_urls)
+
+def download_from_cdn(cdn_urls):
+    os.makedirs("/tmp/yt_downloads", exist_ok=True)
+    output = f"/tmp/yt_downloads/yt_{int(time.time())}.mp4"
+
+    try:
+        if len(cdn_urls) >= 2:
+            # Video + Audio alag — ffmpeg se merge
+            cmd = ["ffmpeg", "-y",
+                   "-i", cdn_urls[0],
+                   "-i", cdn_urls[1],
+                   "-c", "copy", output]
+        else:
+            cmd = ["ffmpeg", "-y", "-i", cdn_urls[0], "-c", "copy", output]
+
+        subprocess.run(cmd, capture_output=True, timeout=3600)
+
+        if os.path.exists(output) and os.path.getsize(output) > 1024:
+            size = os.path.getsize(output) / (1024 * 1024)
+            msg(f"✅ Download complete! {size:.1f} MB")
+            return output
+        else:
+            msg("❌ ffmpeg download fail")
+            return None
+    except Exception as e:
+        msg(f"❌ CDN download error: {str(e)[:150]}")
+        return None
+
+def process_youtube(url, quality, folder_name=""):
+    msg(f"🎬 YouTube: {url[:60]}\nQuality: {quality}p")
+    result = download_youtube_via_colab(url, quality)
+    if result:
+        sz = os.path.getsize(result) / (1024 * 1024)
+        msg(f"JazzDrive upload ho raha hai... ({sz:.1f} MB)")
+        jazz_drive_upload(result, folder_name)
+        clean(result)
+    else:
+        msg("❌ YouTube download fail!\nColab poller chalu karo phir dobara bhejo.")
+
+# ═══════════════════════════════════════
 # 📎 Direct Link Process
 # ═══════════════════════════════════════
 def process_direct(url, folder_name=""):
@@ -440,45 +538,4 @@ def jazz_drive_upload(filename, folder_name=""):
 
             page.wait_for_selector("input[type='file']", state="attached")
             with page.expect_file_chooser() as fc_info:
-                page.click("xpath=/html/body/div[2]/div[3]/div/div/form/div/div/div/div[1]")
-            fc_info.value.set_files(abs_path)
-
-            time.sleep(3)
-            try:
-                yes_btn = page.get_by_text("Yes", exact=True)
-                if yes_btn.is_visible(): yes_btn.click()
-            except: pass
-
-            sz = os.path.getsize(filename)/(1024*1024)
-            wait_sec = max(60, int(sz * 4))
-            msg(f"Uploading {os.path.basename(filename)[:50]}... (~{wait_sec}s)")
-
-            elapsed = 0
-            upload_done = False
-            while elapsed < wait_sec:
-                time.sleep(30)
-                elapsed += 30
-                try:
-                    if page.locator("text=Uploads completed").is_visible():
-                        msg(f"Upload complete! ({elapsed}s)")
-                        upload_done = True
-                        break
-                except: pass
-                if elapsed % 60 == 0:
-                    take_screenshot(page, f"Upload progress {elapsed}s/{wait_sec}s")
-
-            if not upload_done:
-                take_screenshot(page, f"Final state {elapsed}s")
-
-            ctx.storage_state(path="state.json")
-
-        except Exception as e:
-            msg(f"Upload error: {str(e)[:200]}")
-        finally:
-            browser.close()
-
-if __name__ == "__main__":
-    msg("BOT ONLINE!\n\nReady!\nDirect link ya ZIP/RAR bhejein")
-    bot.infinity_polling()
-
-    
+                page.click
