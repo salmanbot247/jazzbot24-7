@@ -411,15 +411,15 @@ def jazz_drive_upload(filename, folder_name=""):
         )
         page = ctx.new_page()
         try:
-            page.goto("https://cloud.jazzdrive.com.pk/", wait_until="networkidle", timeout=90000)
-            time.sleep(3)
+            page.goto("https://cloud.jazzdrive.com.pk/#folders", wait_until="networkidle", timeout=90000)
+            time.sleep(5)
 
             if page.locator("#msisdn").is_visible():
                 msg("Session expire! Login karo...")
                 ok = do_login(page, ctx)
                 if not ok: msg("Login fail."); return
-                page.goto("https://cloud.jazzdrive.com.pk/", wait_until="networkidle", timeout=90000)
-                time.sleep(3)
+                page.goto("https://cloud.jazzdrive.com.pk/#folders", wait_until="networkidle", timeout=90000)
+                time.sleep(5)
 
             # 📁 Folder navigate karein agar diya gaya ho
             if folder_name and folder_name.strip().upper() != "ROOT" and folder_name.strip() != "":
@@ -433,21 +433,15 @@ def jazz_drive_upload(filename, folder_name=""):
             ctx.storage_state(path="state.json")
             abs_path = os.path.abspath(filename)
 
-            try:
-                page.evaluate("document.querySelectorAll('header button').forEach(b => { if(b.innerHTML.includes('svg') || b.innerHTML.includes('upload')) b.click(); })")
-                time.sleep(2)
-            except: pass
+            # Upload button click (Colab wala XPath)
+            for sel in ["xpath=/html/body/div/div/div[1]/div/header/div/div/button", "button:has-text('Upload')"]:
+                try: page.click(sel, timeout=5000); break
+                except: pass
 
-            try:
-                dialog = page.locator("div[role='dialog']")
-                if dialog.is_visible():
-                    with page.expect_file_chooser() as fc_info:
-                        dialog.locator("text=/upload/i").first.click()
-                    fc_info.value.set_files(abs_path)
-                else:
-                    page.locator("input[type=file]").set_input_files(abs_path)
-            except:
-                page.locator("input[type=file]").set_input_files(abs_path)
+            page.wait_for_selector("input[type='file']", state="attached")
+            with page.expect_file_chooser() as fc_info:
+                page.click("xpath=/html/body/div[2]/div[3]/div/div/form/div/div/div/div[1]")
+            fc_info.value.set_files(abs_path)
 
             time.sleep(3)
             try:
@@ -486,4 +480,5 @@ def jazz_drive_upload(filename, folder_name=""):
 if __name__ == "__main__":
     msg("BOT ONLINE!\n\nReady!\nDirect link ya ZIP/RAR bhejein")
     bot.infinity_polling()
+
     
