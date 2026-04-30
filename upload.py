@@ -8,8 +8,8 @@ ZIP_EXTS = [".zip", ".rar", ".7z", ".tar", ".gz"]
 MAX_SIZE_MB = 1990
 
 BOTS = [
-    {"token": "8485872476:AAE-mNl9roDNnwDQV16M2WREkf479kKCOzs", "chat_id": 7144917062, "state_file": "state1.json"},
-    {"token": "8350099407:AAGYAnEVawWcAWmS_Cb7Zd6W2TOHhRX38UQ", "chat_id": 6741893816, "state_file": "state2.json"},
+    {"8350099407:AAEAX6NzIykESMj50CnduDAwngfHW1ER-oM", "chat_id": 7144917062, "state_file": "state1.json"},
+   
 ]
 
 def is_zip_url(link):
