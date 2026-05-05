@@ -26,7 +26,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y aria2 ffmpeg wget curl --fix-missing || true
           pip install --upgrade pip
-          pip install playwright pyTelegramBotAPI requests yt-dlp
+          pip install playwright pyTelegramBotAPI requests "yt-dlp>=2024.1.1"
           sudo cp $(python -c "import shutil; print(shutil.which('yt-dlp'))") /usr/local/bin/yt-dlp
           sudo chmod +x /usr/local/bin/yt-dlp
           yt-dlp --version
@@ -40,10 +40,10 @@ jobs:
       - name: Save Session
         if: always()
         run: |
-          if [ -f state.json ]; then
+          if [ -f state1.json ]; then
             git config --global user.name "GitHub Action"
             git config --global user.email "action@github.com"
-            git add state.json
+            git add state1.json
             git commit -m "Save Jazz Drive session" || echo "No changes"
             git push || echo "Push failed"
           else
