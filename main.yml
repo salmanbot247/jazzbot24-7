@@ -24,9 +24,9 @@ jobs:
       - name: Install Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y aria2 ffmpeg wget curl --fix-missing || true
-          python -m pip install --upgrade pip
-          pip install -U yt-dlp curl_cffi playwright pyTelegramBotAPI requests nest_asyncio
+          sudo apt-get install -y aria2 ffmpeg wget curl p7zip-full unzip --fix-missing || true
+          pip install --upgrade pip
+          pip install playwright pyTelegramBotAPI requests yt-dlp
           playwright install chromium --with-deps || playwright install chromium
 
       - name: Run Bot
@@ -50,7 +50,7 @@ jobs:
       - name: Auto-Restart Bot
         if: always()
         run: |
-          WORKFLOW_FILE="main.yml"
+          WORKFLOW_FILE="run.yml"
           RESPONSE=$(curl -s -o /tmp/response.json -w "%{http_code}" \
             -X POST \
             -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
