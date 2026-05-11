@@ -31,7 +31,6 @@ def file_ok(f, min_mb=0.5):
 def clean(f):
     if os.path.exists(f): os.remove(f)
 
-
 class BotInstance:
     def __init__(self, token, chat_id, state_file):
         self.token = token
@@ -315,6 +314,7 @@ class BotInstance:
             "noplaylist": False,
             "quiet": True,
             "no_warnings": True,
+            "impersonate": "chrome",  # 👈 YEH WAPIS LAGA DIYA HAI
             "http_headers": {"User-Agent": WEB_UA},
         }
         try:
