@@ -1,13 +1,4 @@
 import os, re, time, threading, queue, subprocess, requests, zipfile, telebot
-
-# ============================================================
-# 🛠️ FIX: YOUTUBE CHROME IMPERSONATE BYPASS (Auto-Installer)
-# Yeh hissa khud 'curl_cffi' aur latest yt-dlp install karega
-# ============================================================
-print("⏳ Checking YouTube bypass tools...")
-subprocess.run(["pip", "install", "-U", "yt-dlp", "curl_cffi"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-# ============================================================
-
 import yt_dlp
 from playwright.sync_api import sync_playwright
 
@@ -324,7 +315,6 @@ class BotInstance:
             "noplaylist": False,
             "quiet": True,
             "no_warnings": True,
-            "impersonate": "chrome",  # YouTube bot detection bypass
             "http_headers": {"User-Agent": WEB_UA},
         }
         try:
