@@ -314,8 +314,8 @@ class BotInstance:
             "noplaylist": False,
             "quiet": True,
             "no_warnings": True,
-            "impersonate": "chrome",  # 👈 YEH WAPIS LAGA DIYA HAI
-            "http_headers": {"User-Agent": WEB_UA},
+            # 🚀 NAYA BYPASS: Chrome Mask khatam! YouTube ko lagega yeh Android App hai!
+            "extractor_args": {"youtube": ["client=ANDROID,IOS"]},
         }
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
