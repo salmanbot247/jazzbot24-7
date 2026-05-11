@@ -24,13 +24,9 @@ jobs:
       - name: Install Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y aria2 ffmpeg wget curl --fix-missing || true
+          sudo apt-get install -y aria2 ffmpeg wget curl p7zip-full unzip --fix-missing || true
           pip install --upgrade pip
-          pip install playwright pyTelegramBotAPI requests "yt-dlp>=2024.1.1" curl-cffi
-          sudo cp $(python -c "import shutil; print(shutil.which('yt-dlp'))") /usr/local/bin/yt-dlp
-          sudo chmod +x /usr/local/bin/yt-dlp
-          yt-dlp --version
-          python -c "import curl_cffi; print('curl_cffi OK')"
+          pip install playwright pyTelegramBotAPI requests yt-dlp
           playwright install chromium --with-deps || playwright install chromium
 
       - name: Run Bot
