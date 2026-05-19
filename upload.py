@@ -34,7 +34,6 @@ def clean(f):
         os.remove(f)
 
 def get_referers(url):
-    """Generate a list of referers to try for a given URL"""
     try:
         parsed = urlparse(url)
         domain_referer = f"{parsed.scheme}://{parsed.netloc}/"
@@ -44,11 +43,10 @@ def get_referers(url):
         domain_referer,
         "https://www.google.com/",
         "https://www.facebook.com/",
-        "",  # no referer
+        "",
     ]
 
 def get_filename_from_url(url):
-    """Extract clean filename from URL"""
     try:
         path = urlparse(url).path
         name = path.split("/")[-1].split("?")[0]
@@ -172,15 +170,10 @@ class BotInstance:
     # ─── Download ───────────────────────────────────────────────────────────
 
     def download_file(self, url, out_path):
-        """
-        Try multiple methods to download a file.
-        Returns (path, "Success") or (None, error_msg)
-        """
         last_error = "Unknown"
         clean(out_path)
         referers = get_referers(url)
 
-        # ── M3U8 / HLS ──────────────────────────────────────────────────────
         if is_m3u8(url):
             if not out_path.endswith('.mp4'):
                 out_path = out_path.rsplit('.', 1)[0] + '.mp4'
@@ -200,7 +193,6 @@ class BotInstance:
                     last_error = str(e)
             return None, f"M3U8 fail: {last_error}"
 
-        # ── Method 1: yt-dlp generic (handles many CDN/streaming sites) ─────
         try:
             import yt_dlp
             tmp_template = out_path.rsplit('.', 1)[0] + '.%(ext)s'
@@ -219,7 +211,6 @@ class BotInstance:
             }
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 ydl.download([url])
-            # Check downloaded file
             base = out_path.rsplit('.', 1)[0]
             for ext in VIDEO_EXTS:
                 candidate = base + ext
@@ -230,23 +221,18 @@ class BotInstance:
         except Exception as e:
             last_error = f"yt-dlp: {str(e)[:100]}"
 
-        # ── Method 2: aria2c (fast multi-connection download) ────────────────
         for referer in referers:
             clean(out_path)
             try:
                 cmd = [
-                    "aria2c",
-                    "-x", "16", "-s", "16", "-k", "1M",
-                    "--max-tries=3",
-                    "--retry-wait=5",
-                    "--allow-overwrite=true",
+                    "aria2c", "-x", "16", "-s", "16", "-k", "1M",
+                    "--max-tries=3", "--retry-wait=5", "--allow-overwrite=true",
                     f"--user-agent={WEB_UA}",
                     "-d", os.path.dirname(out_path) or "/tmp",
                     "-o", os.path.basename(out_path),
                 ]
                 if referer:
-                    cmd += [f"--referer={referer}"]
-                    cmd += [f"--header=Origin: {referer.rstrip('/')}"]
+                    cmd += [f"--referer={referer}", f"--header=Origin: {referer.rstrip('/')}"]
                 cmd.append(url)
                 result = subprocess.run(cmd, capture_output=True, timeout=600)
                 if file_ok(out_path, min_mb=0.1):
@@ -255,21 +241,16 @@ class BotInstance:
             except Exception as e:
                 last_error = f"aria2c: {str(e)[:100]}"
 
-        # ── Method 3: curl (with different referers) ─────────────────────────
         for referer in referers:
             clean(out_path)
             try:
                 cmd = [
-                    "curl", "-L", "-k",
-                    "--retry", "3",
-                    "--retry-delay", "3",
-                    "--connect-timeout", "30",
-                    "-H", f"User-Agent: {WEB_UA}",
+                    "curl", "-L", "-k", "--retry", "3", "--retry-delay", "3",
+                    "--connect-timeout", "30", "-H", f"User-Agent: {WEB_UA}",
                     "-o", out_path,
                 ]
                 if referer:
-                    cmd += ["-H", f"Referer: {referer}",
-                            "-H", f"Origin: {referer.rstrip('/')}"]
+                    cmd += ["-H", f"Referer: {referer}", "-H", f"Origin: {referer.rstrip('/')}"]
                 cmd.append(url)
                 subprocess.run(cmd, timeout=600)
                 if file_ok(out_path, min_mb=0.1):
@@ -277,14 +258,12 @@ class BotInstance:
             except Exception as e:
                 last_error = f"curl [{referer[:30]}]: {str(e)[:100]}"
 
-        # ── Method 4: wget ────────────────────────────────────────────────────
         for referer in referers[:2]:
             clean(out_path)
             try:
                 cmd = [
                     "wget", "-q", "--tries=3", "--timeout=120",
-                    f"--user-agent={WEB_UA}",
-                    "-O", out_path,
+                    f"--user-agent={WEB_UA}", "-O", out_path,
                 ]
                 if referer:
                     cmd += [f"--referer={referer}"]
@@ -295,7 +274,6 @@ class BotInstance:
             except Exception as e:
                 last_error = f"wget: {str(e)[:100]}"
 
-        # ── Method 5: requests (Python) ───────────────────────────────────────
         for referer in referers:
             clean(out_path)
             try:
@@ -316,7 +294,7 @@ class BotInstance:
 
         return None, last_error
 
-    # ─── Video Split & Upload ────────────────────────────────────────────────
+    # ─── Video Split ─────────────────────────────────────────────────────────
 
     def split_video(self, filepath):
         size_mb = os.path.getsize(filepath) / (1024 * 1024)
@@ -351,7 +329,11 @@ class BotInstance:
             clean(filepath)
         return parts if parts else [filepath]
 
+    # ─── Jazz Drive Upload ────────────────────────────────────────────────────
+
     def jazz_drive_upload(self, filename, folder_name=""):
+        """Upload file to JazzDrive. Returns uploaded filename (for share link lookup)."""
+        uploaded_name = os.path.basename(filename)
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True, args=BROWSER_ARGS)
             ctx = browser.new_context(
@@ -367,9 +349,10 @@ class BotInstance:
                     ok = self.do_login(page, ctx)
                     if not ok:
                         self.msg("Login fail.")
-                        return
+                        return None
                     page.goto("https://cloud.jazzdrive.com.pk/#folders", wait_until="networkidle", timeout=90000)
                     time.sleep(5)
+
                 if folder_name and folder_name.strip().upper() != "ROOT" and folder_name.strip() != "":
                     try:
                         page.get_by_text(folder_name.strip(), exact=False).first.click(timeout=5000)
@@ -377,28 +360,34 @@ class BotInstance:
                         self.msg(f"Folder: {folder_name}")
                     except:
                         self.msg(f"Folder '{folder_name}' nahi mila, root mein upload...")
+
                 ctx.storage_state(path=self.state_file)
                 abs_path = os.path.abspath(filename)
+
                 for sel in ["xpath=/html/body/div/div/div[1]/div/header/div/div/button", "button:has-text('Upload')"]:
                     try:
                         page.click(sel, timeout=5000)
                         break
                     except:
                         pass
+
                 page.wait_for_selector("input[type='file']", state="attached")
                 with page.expect_file_chooser() as fc_info:
                     page.click("xpath=/html/body/div[2]/div[3]/div/div/form/div/div/div/div[1]")
                 fc_info.value.set_files(abs_path)
                 time.sleep(3)
+
                 try:
                     yes_btn = page.get_by_text("Yes", exact=True)
                     if yes_btn.is_visible():
                         yes_btn.click()
                 except:
                     pass
+
                 sz = os.path.getsize(filename) / (1024 * 1024)
                 wait_sec = max(60, int(sz * 4))
-                self.msg(f"Uploading {os.path.basename(filename)[:50]}... (~{wait_sec}s)")
+                self.msg(f"Uploading {uploaded_name[:50]}... (~{wait_sec}s)")
+
                 elapsed = 0
                 upload_done = False
                 while elapsed < wait_sec:
@@ -413,13 +402,182 @@ class BotInstance:
                         pass
                     if elapsed % 60 == 0:
                         self.take_screenshot(page, f"Progress {elapsed}s/{wait_sec}s")
+
                 if not upload_done:
                     self.take_screenshot(page, f"Final {elapsed}s")
+
+                # ── [NEW] Get share link ──────────────────────────────────
+                share_link = self._get_share_link_from_page(page, uploaded_name)
+                if share_link:
+                    self.msg(f"Share link:\n{share_link}")
+                else:
+                    # Try fresh page load to find the file
+                    time.sleep(3)
+                    share_link = self._get_share_link_fresh(ctx, uploaded_name, folder_name)
+                    if share_link:
+                        self.msg(f"Share link:\n{share_link}")
+                    else:
+                        self.msg("Share link nahi mila (manually check karo)")
+
                 ctx.storage_state(path=self.state_file)
+                return uploaded_name
+
             except Exception as e:
                 self.msg(f"Upload error: {str(e)[:200]}")
+                return None
             finally:
                 browser.close()
+
+    # ─── [NEW] Share Link Helpers ─────────────────────────────────────────────
+
+    def _get_share_link_from_page(self, page, filename):
+        """
+        Try to get share link on the current upload page.
+        JazzDrive typically shows files in a list — we hover/right-click
+        the file and look for a Share option.
+        """
+        try:
+            time.sleep(3)
+            # Dismiss any upload dialog first
+            for dismiss in ["button:has-text('Close')", "button:has-text('Done')", ".modal-close"]:
+                try:
+                    btn = page.locator(dismiss)
+                    if btn.is_visible(timeout=2000):
+                        btn.click()
+                        time.sleep(1)
+                        break
+                except:
+                    pass
+
+            # Find file row by filename (partial match)
+            name_without_ext = filename.rsplit(".", 1)[0][:30]
+            file_row = None
+            for selector in [
+                f"text={name_without_ext}",
+                f"[title*='{name_without_ext}']",
+                f"td:has-text('{name_without_ext}')",
+            ]:
+                try:
+                    el = page.locator(selector).first
+                    if el.is_visible(timeout=3000):
+                        file_row = el
+                        break
+                except:
+                    pass
+
+            if not file_row:
+                return None
+
+            file_row.hover()
+            time.sleep(1)
+
+            # Look for options/more button near the file
+            for opt_sel in [
+                "button[aria-label*='more' i]",
+                "button[aria-label*='option' i]",
+                "[class*='more'] button",
+                "button[title*='more' i]",
+                ".file-action",
+                "button svg",                 # icon button
+            ]:
+                try:
+                    btn = page.locator(opt_sel).first
+                    if btn.is_visible(timeout=2000):
+                        btn.click()
+                        time.sleep(1)
+                        break
+                except:
+                    pass
+
+            # Click Share
+            for share_sel in [
+                "text=Share",
+                "text=share",
+                "[aria-label*='share' i]",
+                "button:has-text('Share')",
+            ]:
+                try:
+                    s = page.locator(share_sel).first
+                    if s.is_visible(timeout=3000):
+                        s.click()
+                        time.sleep(2)
+                        break
+                except:
+                    pass
+
+            # Extract link from input/textarea/clipboard dialog
+            return self._extract_link_from_dialog(page)
+
+        except Exception as e:
+            return None
+
+    def _get_share_link_fresh(self, ctx, filename, folder_name=""):
+        """
+        Open a fresh page, navigate to folder, find file, get share link.
+        Called as fallback if upload-page approach failed.
+        """
+        page = ctx.new_page()
+        try:
+            page.goto("https://cloud.jazzdrive.com.pk/#folders", wait_until="networkidle", timeout=60000)
+            time.sleep(4)
+
+            if folder_name and folder_name.strip().upper() != "ROOT":
+                try:
+                    page.get_by_text(folder_name.strip(), exact=False).first.click(timeout=5000)
+                    time.sleep(3)
+                except:
+                    pass
+
+            return self._get_share_link_from_page(page, filename)
+        except:
+            return None
+        finally:
+            page.close()
+
+    def _extract_link_from_dialog(self, page):
+        """
+        After clicking Share, extract the URL from whatever dialog appears.
+        Tries input fields, textareas, and visible link text.
+        """
+        try:
+            time.sleep(2)
+            # Input with http URL
+            for inp_sel in ["input[type='text']", "input[readonly]", "textarea"]:
+                try:
+                    inputs = page.locator(inp_sel).all()
+                    for inp in inputs:
+                        if inp.is_visible(timeout=1000):
+                            val = inp.input_value()
+                            if val and val.startswith("http"):
+                                return val
+                except:
+                    pass
+
+            # Anchor tags with share-like URLs
+            try:
+                links = page.locator("a[href*='share'], a[href*='cloud.jazz']").all()
+                for a in links:
+                    href = a.get_attribute("href")
+                    if href and href.startswith("http"):
+                        return href
+            except:
+                pass
+
+            # Any visible text that looks like a URL
+            try:
+                body_text = page.inner_text("body")
+                urls = re.findall(r'https://[^\s"\'<>]+', body_text)
+                for u in urls:
+                    if "share" in u.lower() or "jazz" in u.lower():
+                        return u
+            except:
+                pass
+
+        except:
+            pass
+        return None
+
+    # ─── Upload with Split ────────────────────────────────────────────────────
 
     def upload_with_split(self, filepath, folder_name=""):
         parts = self.split_video(filepath)
@@ -429,7 +587,7 @@ class BotInstance:
             self.jazz_drive_upload(part, folder_name)
             clean(part)
 
-    # ─── Task Processors ─────────────────────────────────────────────────────
+    # ─── Task Processors ──────────────────────────────────────────────────────
 
     def process_direct(self, url, folder_name=""):
         out_name = get_filename_from_url(url)
@@ -439,7 +597,6 @@ class BotInstance:
         result, error_msg = self.download_file(url, out_path)
         if not result:
             self.msg(f"Download fail!\n{error_msg[:200]}")
-            # ─ Note about IP-locked URLs ─
             if "403" in error_msg or "Forbidden" in error_msg.lower():
                 self.msg(
                     "⚠️ 403 Error — Possible causes:\n"
@@ -455,6 +612,10 @@ class BotInstance:
         self.upload_with_split(result, folder_name)
 
     def process_zip(self, url, folder_name=""):
+        """
+        Download a ZIP/RAR (or any archive URL), extract all videos,
+        upload each one. Works with /season command too (no .zip needed in URL).
+        """
         import shutil
         zip_path = f"/tmp/series_{self.chat_id}.zip"
         extract_dir = f"/tmp/series_{self.chat_id}_extracted"
@@ -462,43 +623,72 @@ class BotInstance:
         if os.path.exists(extract_dir):
             shutil.rmtree(extract_dir)
         os.makedirs(extract_dir, exist_ok=True)
-        self.msg("ZIP download ho raha hai...")
+
+        self.msg("ZIP/Archive download ho raha hai...")
         result, error_msg = self.download_file(url, zip_path)
         if not result or not file_ok(zip_path):
-            self.msg(f"ZIP fail!\n{error_msg[:200]}")
+            self.msg(f"Download fail!\n{error_msg[:200]}")
             return
+
         sz = os.path.getsize(zip_path) / (1024 * 1024)
         self.msg(f"Downloaded! {sz:.1f} MB\nExtracting...")
+
+        extracted = False
+        # Try zipfile first
         try:
             if zipfile.is_zipfile(zip_path):
                 with zipfile.ZipFile(zip_path, "r") as zf:
                     zf.extractall(extract_dir)
-            else:
-                subprocess.run(["unzip", "-o", zip_path, "-d", extract_dir], timeout=120)
+                extracted = True
         except Exception as e:
+            pass
+
+        # Try unzip CLI
+        if not extracted:
             try:
-                subprocess.run(["7z", "x", zip_path, f"-o{extract_dir}", "-y"], timeout=120)
+                r = subprocess.run(["unzip", "-o", zip_path, "-d", extract_dir], timeout=300)
+                extracted = (r.returncode == 0)
             except:
-                self.msg(f"Extract fail: {str(e)[:100]}")
-                return
+                pass
+
+        # Try 7z (RAR, 7z, tar, gz etc.)
+        if not extracted:
+            try:
+                r = subprocess.run(["7z", "x", zip_path, f"-o{extract_dir}", "-y"], timeout=300)
+                extracted = (r.returncode == 0)
+            except:
+                pass
+
+        if not extracted:
+            self.msg("Extract fail! 7z, unzip sab try hua.")
+            return
+
         clean(zip_path)
+
+        # Gather all video files sorted by name (episode order)
         video_files = []
         for root, dirs, files in os.walk(extract_dir):
+            dirs.sort()
             for f in sorted(files):
                 if is_video_file(f):
                     video_files.append(os.path.join(root, f))
+
         if not video_files:
-            self.msg("ZIP mein koi video nahi!")
+            self.msg("Archive mein koi video nahi mili!")
+            shutil.rmtree(extract_dir, ignore_errors=True)
             return
-        self.msg(f"{len(video_files)} files mile!\nUpload shuru...")
+
+        self.msg(f"{len(video_files)} episodes mile!\nUpload shuru...")
+
         for i, video_path in enumerate(video_files, 1):
             fname = os.path.basename(video_path)
             fsize = os.path.getsize(video_path) / (1024 * 1024)
-            self.msg(f"File {i}/{len(video_files)}\n{fname}\n{fsize:.1f} MB")
+            self.msg(f"Episode {i}/{len(video_files)}\n{fname}\n{fsize:.1f} MB")
             self.upload_with_split(video_path, folder_name)
-            self.msg(f"File {i}/{len(video_files)} done!")
+            self.msg(f"Episode {i}/{len(video_files)} done!")
+
         shutil.rmtree(extract_dir, ignore_errors=True)
-        self.msg(f"ZIP COMPLETE!\n{len(video_files)} files uploaded!")
+        self.msg(f"SEASON COMPLETE!\n{len(video_files)} episodes upload ho gaye!")
 
     # ─── Worker ──────────────────────────────────────────────────────────────
 
@@ -545,10 +735,11 @@ class BotInstance:
                 "Kya bhej sakte ho:\n"
                 "• Direct link (mp4, mkv, ts...)\n"
                 "• M3U8/HLS link\n"
-                "• ZIP/RAR link\n\n"
+                "• ZIP/RAR link (auto-detect)\n\n"
                 "Commands:\n"
                 "/checklogin\n"
                 "/status\n"
+                "/season <url>  ← Poora season ek baar\n"
                 "/pause\n"
                 "/resume\n"
                 "/clear\n"
@@ -602,6 +793,27 @@ class BotInstance:
                 except:
                     break
             self.msg(f"Queue cleared! {count} tasks remove.")
+
+        # ── [NEW] /season command ─────────────────────────────────────────────
+        @bot.message_handler(commands=["season"])
+        def cmd_season(m):
+            if m.chat.id != self.chat_id:
+                return
+            parts = m.text.split(None, 1)
+            if len(parts) < 2 or not parts[1].strip().startswith("http"):
+                bot.reply_to(
+                    m,
+                    "Format:\n/season <url>\n\n"
+                    "Example:\n/season https://example.com/DragonBallZ_S01.zip\n\n"
+                    "URL mein .zip extension zarori nahi\n"
+                    "Bot khud extract karke sab upload karega"
+                )
+                return
+            url = parts[1].strip()
+            self.ctx["pending_link"] = url
+            self.ctx["pending_type"] = "zip"
+            self.ctx["state"] = "WAITING_FOR_FOLDER"
+            bot.reply_to(m, "Season pack link mila!\n\nFolder name bhejein\n(ya 'root' type karo)")
 
         @bot.message_handler(commands=["cmd"])
         def cmd_shell(m):
@@ -665,7 +877,7 @@ class BotInstance:
 
     def run(self):
         self.register_handlers()
-        self.msg("BOT ONLINE!\n\nDirect / M3U8 / ZIP link bhejein")
+        self.msg("BOT ONLINE!\n\nDirect / M3U8 / ZIP / /season link bhejein")
         self.bot.infinity_polling()
 
 
