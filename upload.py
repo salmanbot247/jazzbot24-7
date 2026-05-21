@@ -428,84 +428,83 @@ class BotInstance:
             finally:
                 browser.close()
 
-    # ─── [NEW] Share Link Helpers ─────────────────────────────────────────────
+    # ─── Share Link Helpers (Exact selectors from DevTools inspection) ──────────
 
     def _get_share_link_from_page(self, page, filename):
         """
-        Try to get share link on the current upload page.
-        JazzDrive typically shows files in a list — we hover/right-click
-        the file and look for a Share option.
+        Exact flow from DevTools inspection:
+        1. File select karo (checkbox click)
+        2. Top bar mein Share button click karo (aria-label="Share")
+        3. Dialog mein input[name="get-link-url"] se URL lo
         """
         try:
-            time.sleep(3)
-            # Dismiss any upload dialog first
-            for dismiss in ["button:has-text('Close')", "button:has-text('Done')", ".modal-close"]:
+            time.sleep(4)
+
+            # ── Step 1: Upload dialog band karo ──────────────────────────────
+            for dismiss in [
+                "button:has-text('Close')",
+                "button:has-text('Done')",
+                "button:has-text('X')",
+                "[aria-label='Close']",
+            ]:
                 try:
-                    btn = page.locator(dismiss)
-                    if btn.is_visible(timeout=2000):
+                    btn = page.locator(dismiss).first
+                    if btn.is_visible(timeout=1500):
                         btn.click()
                         time.sleep(1)
                         break
                 except:
                     pass
 
-            # Find file row by filename (partial match)
-            name_without_ext = filename.rsplit(".", 1)[0][:30]
-            file_row = None
-            for selector in [
-                f"text={name_without_ext}",
-                f"[title*='{name_without_ext}']",
-                f"td:has-text('{name_without_ext}')",
+            # ── Step 2: File dhundo aur select karo ──────────────────────────
+            name_short = filename.rsplit(".", 1)[0][:25]
+            file_el = None
+            for sel in [
+                f"text={name_short}",
+                f"[title*='{name_short}']",
+                f"td:has-text('{name_short}')",
+                f"span:has-text('{name_short}')",
             ]:
                 try:
-                    el = page.locator(selector).first
+                    el = page.locator(sel).first
                     if el.is_visible(timeout=3000):
-                        file_row = el
+                        file_el = el
                         break
                 except:
                     pass
 
-            if not file_row:
+            if not file_el:
                 return None
 
-            file_row.hover()
-            time.sleep(1)
+            # File ke paas checkbox click karo (select karne ke liye)
+            file_el.click()
+            time.sleep(2)
 
-            # Look for options/more button near the file
-            for opt_sel in [
-                "button[aria-label*='more' i]",
-                "button[aria-label*='option' i]",
-                "[class*='more'] button",
-                "button[title*='more' i]",
-                ".file-action",
-                "button svg",                 # icon button
-            ]:
-                try:
-                    btn = page.locator(opt_sel).first
-                    if btn.is_visible(timeout=2000):
-                        btn.click()
-                        time.sleep(1)
-                        break
-                except:
-                    pass
-
-            # Click Share
+            # ── Step 3: Selection bar mein Share button click karo ────────────
+            # Image 1 se: aria-label="Share" wala button
+            share_clicked = False
             for share_sel in [
+                "button[aria-label='Share']",
+                "[data-testid='ShareIcon']",
+                "button:has([data-testid='ShareIcon'])",
+                # Image 3 se: context menu ka Share option
                 "text=Share",
-                "text=share",
-                "[aria-label*='share' i]",
-                "button:has-text('Share')",
             ]:
                 try:
-                    s = page.locator(share_sel).first
-                    if s.is_visible(timeout=3000):
-                        s.click()
+                    btn = page.locator(share_sel).first
+                    if btn.is_visible(timeout=3000):
+                        btn.click()
+                        share_clicked = True
                         time.sleep(2)
                         break
                 except:
                     pass
 
-            # Extract link from input/textarea/clipboard dialog
+            if not share_clicked:
+                return None
+
+            # ── Step 4: Dialog se link lo ─────────────────────────────────────
+            # Image 2 se: input[name="get-link-url"] mein exact URL hota hai
             return self._extract_link_from_dialog(page)
 
         except Exception as e:
@@ -513,8 +512,8 @@ class BotInstance:
 
     def _get_share_link_fresh(self, ctx, filename, folder_name=""):
         """
-        Open a fresh page, navigate to folder, find file, get share link.
-        Called as fallback if upload-page approach failed.
+        Fresh page pe navigate karke share link lo.
+        Fallback method.
         """
         page = ctx.new_page()
         try:
@@ -536,40 +535,43 @@ class BotInstance:
 
     def _extract_link_from_dialog(self, page):
         """
-        After clicking Share, extract the URL from whatever dialog appears.
-        Tries input fields, textareas, and visible link text.
+        Share dialog se URL nikalna.
+        Image 2 se exact selector: input[name="get-link-url"]
+        URL format: https://cloud.jazzdrive.com.pk/share/XXXXXXXX
         """
         try:
             time.sleep(2)
-            # Input with http URL
-            for inp_sel in ["input[type='text']", "input[readonly]", "textarea"]:
-                try:
-                    inputs = page.locator(inp_sel).all()
-                    for inp in inputs:
-                        if inp.is_visible(timeout=1000):
-                            val = inp.input_value()
-                            if val and val.startswith("http"):
-                                return val
-                except:
-                    pass
 
-            # Anchor tags with share-like URLs
+            # ── Exact selector from Image 2 ───────────────────────────────────
             try:
-                links = page.locator("a[href*='share'], a[href*='cloud.jazz']").all()
-                for a in links:
-                    href = a.get_attribute("href")
-                    if href and href.startswith("http"):
-                        return href
+                inp = page.locator("input[name='get-link-url']").first
+                if inp.is_visible(timeout=4000):
+                    val = inp.input_value()
+                    if val and val.startswith("http"):
+                        return val
             except:
                 pass
 
-            # Any visible text that looks like a URL
+            # ── Fallback: koi bhi readonly input jo jazzdrive share URL ho ────
+            try:
+                inputs = page.locator("input[readonly], input[type='text']").all()
+                for inp in inputs:
+                    try:
+                        if inp.is_visible(timeout=1000):
+                            val = inp.input_value()
+                            if val and "jazzdrive.com.pk/share/" in val:
+                                return val
+                    except:
+                        pass
+            except:
+                pass
+
+            # ── Fallback: page text mein share URL dhundo ─────────────────────
             try:
                 body_text = page.inner_text("body")
-                urls = re.findall(r'https://[^\s"\'<>]+', body_text)
-                for u in urls:
-                    if "share" in u.lower() or "jazz" in u.lower():
-                        return u
+                urls = re.findall(r'https://cloud\.jazzdrive\.com\.pk/share/[A-Za-z0-9]+', body_text)
+                if urls:
+                    return urls[0]
             except:
                 pass
 
